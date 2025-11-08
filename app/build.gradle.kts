@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.baselineprofile)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -43,6 +44,14 @@ android {
         apiVersion = "1.9"
     }
 
+    buildFeatures {
+        compose = true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.1"
+    }
+
     baselineProfile {
         dexLayoutOptimization = true
     }
@@ -63,6 +72,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.material)
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
 
     // Jetpack Compose
     implementation(platform(libs.androidx.compose.bom))
@@ -70,6 +80,7 @@ dependencies {
     implementation(libs.androidx.compose.icons.extended)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.ui.tooling.preview.android)
+    implementation("androidx.compose.foundation:foundation:1.7.0-beta01")
 
     // Other Jetpack & Android Libraries
     implementation(libs.androidx.datastore)

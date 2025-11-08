@@ -6,6 +6,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ContentCount
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
@@ -150,4 +151,18 @@ abstract class ContentHolder {
     fun getLastModifiedDate(): String {
         return lastModified.toFormattedDate(hideSeconds = true)
     }
+
+    fun toFileItem(): FileItem {
+        return FileItem(
+            path = this.uniquePath,
+            name = this.displayName,
+            isDirectory = this.isFolder,
+            lastModified = this.lastModified,
+            size = this.size,
+            extension = this.extension
+        )
+    }
+
+    abstract fun getFileExtension(): String
+
 }

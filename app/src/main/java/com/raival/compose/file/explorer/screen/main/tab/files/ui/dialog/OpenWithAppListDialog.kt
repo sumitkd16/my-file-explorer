@@ -5,8 +5,10 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.DropdownMenu
@@ -22,11 +24,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.raival.compose.file.explorer.App.Companion.globalClass
@@ -43,8 +49,6 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.OpenWithAct
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.DefaultOpeningMethods
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.anyFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.OpeningMethod
-import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRow
-import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRowIcon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -138,7 +142,6 @@ fun OpenWithAppListDialog(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .animateItem()
                                 .combinedClickable(
                                     onClick = {
                                         contentHolder.openFileWithPackage(
@@ -154,18 +157,51 @@ fun OpenWithAppListDialog(
                                 )
                         ) {
                             Space(size = 4.dp)
-                            ItemRow(
-                                title = item.label,
-                                subtitle = item.name,
-                                ignoreSizePreferences = true,
-                                icon = {
-                                    ItemRowIcon(
-                                        icon = item.icon,
-                                        placeholder = R.drawable.apk_file_placeholder,
-                                        ignoreSizePreferences = true
+
+                            // Custom row implementation to replace ItemRow
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Icon - replacing ItemRowIcon
+                                if (item.icon != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = item.icon.asImageBitmap(),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                } else {
+                                    androidx.compose.foundation.Image(
+                                        painter = painterResource(id = R.drawable.apk_file_placeholder),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp)
                                     )
                                 }
-                            )
+
+                                Space(size = 16.dp)
+
+                                // Text content
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = item.label,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 16.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = item.name,
+                                        fontSize = 14.sp,
+                                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
 
                             Space(size = 4.dp)
 

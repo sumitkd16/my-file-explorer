@@ -27,6 +27,7 @@ import com.raival.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
 import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.pdf.PdfViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
+import com.raival.compose.file.explorer.viewer.MediaViewerActivity
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -61,6 +62,10 @@ class LocalFileHolder(val file: File) : ContentHolder() {
     val mimeType by lazy { file.mimeType ?: anyFileType }
 
     val basePath by lazy { file.getBasePath(globalClass) }
+
+    override fun getFileExtension(): String {
+        return extension
+    }
 
     override suspend fun getDetails(): String {
         val separator = " | "
@@ -286,30 +291,21 @@ class LocalFileHolder(val file: File) : ContentHolder() {
             return true
         }
 
+        // 🎯 CHANGED: Videos now use our swipe navigation
         if (FileMimeType.videoFileType.contains(extension)) {
-            openFileWithPackage(
-                context,
-                context.packageName,
-                VideoPlayerActivity::class.java.name
-            )
+            openMediaFilesWithSwipe(context)
             return true
         }
 
+        // 🎯 CHANGED: Audio now uses our swipe navigation too
         if (FileMimeType.audioFileType.contains(extension)) {
-            openFileWithPackage(
-                context,
-                context.packageName,
-                AudioPlayerActivity::class.java.name
-            )
+            openMediaFilesWithSwipe(context)
             return true
         }
 
         if (FileMimeType.imageFileType.contains(extension)) {
-            openFileWithPackage(
-                context,
-                context.packageName,
-                ImageViewerActivity::class.java.name
-            )
+            // Use our new swipe navigation for images
+            openMediaFilesWithSwipe(context)
             return true
         }
 
@@ -323,6 +319,33 @@ class LocalFileHolder(val file: File) : ContentHolder() {
         }
 
         return false
+    }
+
+    private fun openMediaFilesWithSwipe(context: Context) {
+        // Get all media files in current directory
+        val currentDir = file.parentFile
+        val mediaFiles = arrayListOf<File>()
+
+        currentDir?.listFiles()?.forEach { file ->
+            val ext = file.extension.lowercase()
+            val imageExtensions = listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+            val videoExtensions = listOf("mp4", "avi", "mkv", "mov", "wmv", "flv", "webm")
+
+            if (imageExtensions.contains(ext) || videoExtensions.contains(ext)) {
+                mediaFiles.add(file)
+            }
+        }
+
+        if (mediaFiles.isNotEmpty()) {
+            val currentPosition = mediaFiles.indexOf(file)
+            if (currentPosition != -1) {
+                val intent = Intent(context, MediaViewerActivity::class.java).apply {
+                    putStringArrayListExtra("media_paths", ArrayList(mediaFiles.map { it.absolutePath }))
+                    putExtra("current_position", currentPosition)
+                }
+                context.startActivity(intent)
+            }
+        }
     }
 
     private fun createUri() = FileProvider.getUriForFile(

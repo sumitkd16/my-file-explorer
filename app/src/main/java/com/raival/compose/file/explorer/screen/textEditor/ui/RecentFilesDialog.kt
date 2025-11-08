@@ -77,7 +77,6 @@ fun RecentFilesDialog(codeEditor: CodeEditor) {
                                 .fillMaxWidth()
                             Column(
                                 Modifier
-                                    .animateItem()
                                     .combinedClickable(
                                         onClick = {
                                             textEditorManager.switchActiveFileTo(
@@ -116,9 +115,7 @@ fun RecentFilesDialog(codeEditor: CodeEditor) {
                                     )
                                     FileItemRow(
                                         item = it.file,
-                                        fileDetails = it.file.basePath,
-                                        namePrefix = if (it.requireSave) "* " else emptyString,
-                                        ignoreSizePreferences = true
+                                        fileDetails = it.file.basePath
                                     )
                                 }
                                 HorizontalDivider(

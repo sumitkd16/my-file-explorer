@@ -30,6 +30,10 @@ class RootFileHolder : ContentHolder() {
     override val canRead = true
     override val canWrite = false
 
+    override fun getFileExtension(): String {
+        return ""
+    }
+
     override suspend fun listContent(): ArrayList<out ContentHolder> {
         val content = ArrayList<LocalFileHolder>()
 

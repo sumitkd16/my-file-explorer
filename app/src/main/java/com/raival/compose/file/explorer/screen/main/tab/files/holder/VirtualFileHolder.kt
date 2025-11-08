@@ -1,5 +1,7 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.holder
 
+import android.content.Context
+import android.content.Intent
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
@@ -13,6 +15,8 @@ import com.raival.compose.file.explorer.screen.main.tab.files.provider.StoragePr
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getRecentFiles
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getSearchResult
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getVideoFiles
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
+import com.raival.compose.file.explorer.viewer.MediaViewerActivity
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -44,6 +48,10 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
     override val uniquePath = displayName
 
     override val extension = emptyString
+
+    override fun getFileExtension(): String {
+        return ""
+    }
 
     override suspend fun isValid() = true
 
@@ -126,6 +134,59 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
     override val canWrite = false
 
     override suspend fun getContentCount() = ContentCount(files = fileCount)
+
+    override fun open(
+        context: Context,
+        anonymous: Boolean,
+        skipSupportedExtensions: Boolean,
+        customMimeType: String?
+    ) {
+        // 🎯 CHANGED: Use our swipe navigation for media files in virtual folders too!
+        when (type) {
+            IMAGE, VIDEO, AUDIO -> {
+                openVirtualMediaFilesWithSwipe(context)
+                return
+            }
+        }
+
+        // Fallback to default behavior for other types
+        super.open(context, anonymous, skipSupportedExtensions, customMimeType)
+    }
+
+    private fun openVirtualMediaFilesWithSwipe(context: Context) {
+        // Get all media files from this virtual folder (bookmarks, images, videos, audio)
+        val mediaFiles = when (type) {
+            IMAGE -> getImageFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
+            VIDEO -> getVideoFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
+            AUDIO -> getAudioFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
+            BOOKMARKS -> getBookmarks()
+            else -> arrayListOf()
+        }
+
+        if (mediaFiles.isNotEmpty()) {
+            // Convert to FileItem list for our MediaViewerActivity
+            val fileItems = mediaFiles.mapNotNull { holder ->
+                if (holder is LocalFileHolder) {
+                    FileItem(
+                        path = holder.file.absolutePath,
+                        name = holder.displayName,
+                        isDirectory = holder.isFolder,
+                        lastModified = holder.lastModified,
+                        size = holder.size,
+                        extension = holder.extension
+                    )
+                } else null
+            }
+
+            if (fileItems.isNotEmpty()) {
+                val intent = Intent(context, MediaViewerActivity::class.java).apply {
+                    putParcelableArrayListExtra("media_files", ArrayList(fileItems))
+                    putExtra("initial_position", 0)
+                }
+                context.startActivity(intent)
+            }
+        }
+    }
 
     companion object {
         const val BOOKMARKS = 0

@@ -56,6 +56,11 @@ class FilesTab(
 ) : Tab() {
     companion object {
         fun isValidLocalPath(path: String) = File(path).exists()
+
+        // Performance constants
+        private const val PAGE_SIZE = 1000 // Load files in chunks of 100
+        private const val INITIAL_LOAD_SIZE = 1000 // Initial visible files
+        private const val LOAD_THRESHOLD = 50 // Load more when 50 items from end
     }
 
     override val id = globalClass.generateUid()
@@ -69,6 +74,12 @@ class FilesTab(
     var activeFolderContent = mutableStateListOf<ContentHolder>()
     val contentListStates = hashMapOf<String, LazyGridState>()
     var activeListState by mutableStateOf(LazyGridState())
+
+    // Performance: Pagination state
+    private var allFolderContent = mutableListOf<ContentHolder>()
+    private var currentPage = 0
+    var isLoadingMore = false
+    private var hasMoreContent = true
 
     var viewConfig by mutableStateOf(
         globalClass.preferencesManager.getViewConfigPrefsFor(activeFolder)
@@ -292,6 +303,9 @@ class FilesTab(
         // Switch to the new folder
         activeFolder = item
 
+        // Reset pagination state for new folder
+        resetPagination()
+
         // Update header label
         withContext(Dispatchers.Main) {
             tabViewLabel = createTabLabel()
@@ -332,8 +346,8 @@ class FilesTab(
             zipSourceTimestamp = (activeFolder as ZipFileHolder).zipTree.timeStamp
         }
 
-        // Get the content of the new folder
-        listFiles { newContent -> // Main thread
+        // Get the content of the new folder with pagination
+        listFilesWithPagination { newContent -> // Main thread
             // Update the active folder content
             activeFolderContent.clear()
             activeFolderContent.addAll(newContent)
@@ -365,6 +379,52 @@ class FilesTab(
 
             // Call any posted events
             postEvent()
+        }
+    }
+
+    // Performance: Reset pagination state when changing folders
+    private fun resetPagination() {
+        allFolderContent.clear()
+        currentPage = 0
+        isLoadingMore = false
+        hasMoreContent = true
+    }
+
+    // Performance: Load more files when scrolling
+    fun loadMoreFilesIfNeeded(currentIndex: Int) {
+        if (isLoadingMore || !hasMoreContent) return
+
+        val totalLoaded = activeFolderContent.size
+        if (currentIndex >= totalLoaded - LOAD_THRESHOLD) {
+            scope.launch {
+                loadMoreFiles()
+            }
+        }
+    }
+
+    // Performance: Load next page of files
+    private suspend fun loadMoreFiles() {
+        if (isLoadingMore || !hasMoreContent) return
+
+        isLoadingMore = true
+
+        try {
+            val nextPageContent = allFolderContent
+                .drop(currentPage * PAGE_SIZE)
+                .take(PAGE_SIZE)
+
+            if (nextPageContent.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    activeFolderContent.addAll(nextPageContent)
+                    currentPage++
+                }
+            } else {
+                hasMoreContent = false
+            }
+        } catch (e: Exception) {
+            logger.logError(e)
+        } finally {
+            isLoadingMore = false
         }
     }
 
@@ -412,12 +472,12 @@ class FilesTab(
             validateSearchResult()
             val newContent = (activeFolder as VirtualFileHolder).listContent()
             // Check if the content size has changed
-            if (newContent.size != activeFolderContent.size) {
+            if (newContent.size != allFolderContent.size) {
                 reloadFiles()
                 return true
             }
             // Check each file to see if the source has changed
-            if (activeFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
+            if (allFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
                 reloadFiles()
                 return true
             }
@@ -430,12 +490,12 @@ class FilesTab(
                         }
                     }
             // Check if the content size has changed
-            if (newContent != null && newContent.size != activeFolderContent.size) {
+            if (newContent != null && newContent.size != allFolderContent.size) {
                 reloadFiles()
                 return true
             }
             // Check each file to see if the source has changed
-            if (activeFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
+            if (allFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
                 reloadFiles()
                 return true
             }
@@ -555,20 +615,34 @@ class FilesTab(
         }
     }
 
-    private suspend fun listFiles(onReady: (ArrayList<out ContentHolder>) -> Unit) {
+    // Performance: Enhanced file listing with pagination
+    private suspend fun listFilesWithPagination(onReady: (ArrayList<out ContentHolder>) -> Unit) {
         isLoading = true
 
-        val result = activeFolder.listSortedContent()
+        // Load all files first (this is still needed for counting and search)
+        val allContent = activeFolder.listSortedContent()
+        allFolderContent.clear()
+        allFolderContent.addAll(allContent)
 
         activeFolder.getContentCount().let { contentCount ->
             foldersCount = contentCount.folders
             filesCount = contentCount.files
         }
 
+        // Load initial page
+        val initialContent = ArrayList(allFolderContent.take(INITIAL_LOAD_SIZE))
+        hasMoreContent = allFolderContent.size > INITIAL_LOAD_SIZE
+        currentPage = 1 // Next page to load
+
         withContext(Dispatchers.Main) {
-            onReady(result)
+            onReady(initialContent)
             isLoading = false
         }
+    }
+
+    // Keep original for backward compatibility
+    private suspend fun listFiles(onReady: (ArrayList<out ContentHolder>) -> Unit) {
+        listFilesWithPagination(onReady)
     }
 
     // Called when a new file/folder is created

@@ -38,6 +38,10 @@ class ZipFileHolder(
 
     private var contentListCount = ContentCount()
 
+    override fun getFileExtension(): String {
+        return extension
+    }
+
     override suspend fun getDetails(): String {
         if (details.isNotEmpty()) return details
 

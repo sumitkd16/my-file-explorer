@@ -144,6 +144,13 @@
         </activity>
 
         <activity
+            android:name=".viewer.MediaViewerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenLayout|screenSize|keyboardHidden"
+            android:theme="@style/Theme.FileExplorer"
+            android:windowSoftInputMode="adjustNothing" />
+
+        <activity
             android:name=".screen.logs.LogsActivity"
             android:exported="false"
             android:label="@string/title_activity_logs"

@@ -1,6 +1,7 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -37,7 +38,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
@@ -58,7 +62,6 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.ApksMergeTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.FileIcon
-import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRow
 
 @Composable
 fun FileOptionsMenuDialog(
@@ -103,17 +106,51 @@ fun FileOptionsMenuDialog(
                 if (details.isEmpty()) details = targetContentHolder.getDetails()
             }
 
-            ItemRow(
-                title = targetContentHolder.displayName,
-                subtitle = details,
-                ignoreSizePreferences = true,
-                icon = {
-                    FileIcon(
-                        contentHolder = targetContentHolder,
-                        ignoreSizePreferences = true
+            // Fixed: Replace ItemRow with custom row implementation
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FileIcon(
+                    item = targetContentHolder,
+                    size = 48.dp,
+                    viewConfigs = tab.viewConfig,
+                    onClick = {
+                        if (targetContentHolder.isFile()) {
+                            tab.openFile(context, targetContentHolder)
+                        } else {
+                            tab.openFolder(targetContentHolder, false)
+                        }
+                        onDismissRequest()
+                    }
+                )
+
+                Space(size = 12.dp)
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = targetContentHolder.displayName,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    if (details.isNotEmpty()) {
+                        Text(
+                            text = details,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            )
+            }
 
             Space(size = 6.dp)
             HorizontalDivider()
@@ -333,7 +370,9 @@ fun FileOptionsMenuDialog(
                     fromJson<DefaultOpeningMethods>(globalClass.preferencesManager.defaultOpeningMethods)?.let {
                         globalClass.preferencesManager.defaultOpeningMethods =
                             DefaultOpeningMethods(
-                                it.openingMethods.filter { it.extension != targetContentHolder.file.extension }
+                                it.openingMethods.filter { openingMethod ->
+                                    openingMethod.extension != targetContentHolder.file.extension
+                                }
                             ).toJson()
                     }
                     onDismissRequest()

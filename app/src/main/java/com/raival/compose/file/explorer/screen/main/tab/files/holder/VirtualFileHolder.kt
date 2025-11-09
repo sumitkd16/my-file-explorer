@@ -12,13 +12,19 @@ import com.raival.compose.file.explorer.screen.main.tab.files.provider.StoragePr
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getBookmarks
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getDocumentFiles
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getImageFiles
-import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getRecentFiles
+// import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getRecentFiles // <-- REMOVED
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getSearchResult
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getVideoFiles
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
 import com.raival.compose.file.explorer.viewer.MediaViewerActivity
 import kotlinx.coroutines.runBlocking
 import java.io.File
+
+// --- NEW ---
+// Cloned getBookmarks() for Favorites. This reads directly from your PreferencesManager.
+private fun getFavorites() = globalClass.preferencesManager.favorites
+    .map { LocalFileHolder(File(it)) } as ArrayList<LocalFileHolder>
+// --- END NEW ---
 
 class VirtualFileHolder(val type: Int) : ContentHolder() {
     private var fileCount = 0
@@ -29,12 +35,13 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
 
     override val displayName = when (type) {
         BOOKMARKS -> globalClass.getString(R.string.bookmarks)
+        FAVORITES -> globalClass.getString(R.string.favorites) // <-- NEW
         AUDIO -> globalClass.getString(R.string.audios)
         VIDEO -> globalClass.getString(R.string.videos)
         IMAGE -> globalClass.getString(R.string.images)
         ARCHIVE -> globalClass.getString(R.string.archives)
         DOCUMENT -> globalClass.getString(R.string.documents)
-        RECENT -> globalClass.getString(R.string.recent_files)
+        // RECENT -> globalClass.getString(R.string.recent_files) // <-- REMOVED
         SEARCH -> globalClass.getString(R.string.search)
         else -> globalClass.getString(R.string.unknown)
     }
@@ -58,19 +65,16 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
     override suspend fun getParent() = null
 
     override suspend fun listSortedContent(): ArrayList<out ContentHolder> {
-        if (type == SEARCH || type == BOOKMARKS) {
+        // --- MODIFIED ---
+        // Added FAVORITES check
+        if (type == SEARCH || type == BOOKMARKS || type == FAVORITES) {
             return super.listSortedContent()
         }
 
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
 
-        if (type == RECENT && sortingPrefs == globalClass.preferencesManager.getDefaultSortingPrefs()) {
-            return listContent().apply {
-                if (!globalClass.preferencesManager.showHiddenFiles) {
-                    removeIf { it.isHidden() }
-                }
-            }
-        } else return listContent().apply {
+        // --- REMOVED 'RECENT' logic ---
+        return listContent().apply {
             if (!globalClass.preferencesManager.showHiddenFiles) {
                 removeIf { it.isHidden() }
             }
@@ -81,12 +85,13 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
         when (type) {
             BOOKMARKS -> getBookmarks()
+            FAVORITES -> getFavorites() // <-- NEW
             AUDIO -> getAudioFiles(sortingPrefs)
             VIDEO -> getVideoFiles(sortingPrefs)
             IMAGE -> getImageFiles(sortingPrefs)
             ARCHIVE -> getArchiveFiles(sortingPrefs)
             DOCUMENT -> getDocumentFiles(sortingPrefs)
-            RECENT -> getRecentFiles()
+            // RECENT -> getRecentFiles() // <-- REMOVED
             SEARCH -> getSearchResult()
             else -> arrayListOf()
         }.also {
@@ -94,7 +99,8 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
                 clear()
                 addAll(it)
             }
-            if (type != BOOKMARKS) fetchCategories()
+            // --- MODIFIED ---
+            if (type != BOOKMARKS && type != FAVORITES) fetchCategories() // Added FAVORITES
         }
 
         return contentList.filter {
@@ -141,9 +147,9 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
         skipSupportedExtensions: Boolean,
         customMimeType: String?
     ) {
-        // 🎯 CHANGED: Use our swipe navigation for media files in virtual folders too!
+        // --- MODIFIED ---
         when (type) {
-            IMAGE, VIDEO, AUDIO -> {
+            IMAGE, VIDEO, AUDIO, FAVORITES -> { // Added FAVORITES
                 openVirtualMediaFilesWithSwipe(context)
                 return
             }
@@ -154,12 +160,14 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
     }
 
     private fun openVirtualMediaFilesWithSwipe(context: Context) {
-        // Get all media files from this virtual folder (bookmarks, images, videos, audio)
+        // Get all media files from this virtual folder
+        // --- MODIFIED ---
         val mediaFiles = when (type) {
             IMAGE -> getImageFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
             VIDEO -> getVideoFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
             AUDIO -> getAudioFiles(globalClass.preferencesManager.getSortingPrefsFor(this))
             BOOKMARKS -> getBookmarks()
+            FAVORITES -> getFavorites() // <-- NEW
             else -> arrayListOf()
         }
 
@@ -195,7 +203,8 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
         const val IMAGE = 3
         const val ARCHIVE = 4
         const val DOCUMENT = 5
-        const val RECENT = 6
+        const val RECENT = 6 // This can stay, even if unused
         const val SEARCH = 7
+        const val FAVORITES = 8 // <-- NEW
     }
 }

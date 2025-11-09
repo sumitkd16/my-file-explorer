@@ -2,11 +2,18 @@
 
 package com.raival.compose.file.explorer.viewer
 
+import android.annotation.SuppressLint
 import android.app.Activity
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntSize
@@ -53,6 +62,8 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -63,6 +74,7 @@ import coil3.compose.AsyncImage
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.common.extension.getParcelableArrayListExtra
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
+import com.raival.compose.file.explorer.screen.preferences.PreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -116,6 +128,44 @@ private suspend fun toggleBookmark(filePath: String, onResult: (Boolean) -> Unit
             } else {
                 currentBookmarks.add(filePath)
                 globalClass.preferencesManager.bookmarks = currentBookmarks
+                onResult(true)
+            }
+        } catch (e: Exception) {
+            onResult(false)
+        }
+    }
+}
+
+private suspend fun checkFavoriteStatus(filePath: String, onResult: (Boolean) -> Unit) {
+    withContext(Dispatchers.IO) {
+        try {
+            val favorites = globalClass.preferencesManager.favorites
+            val isFavorited = favorites.any { it == filePath }
+            onResult(isFavorited)
+        } catch (e: Exception) {
+            onResult(false)
+        }
+    }
+}
+
+private suspend fun toggleFavorite(filePath: String, onResult: (Boolean) -> Unit) {
+    withContext(Dispatchers.IO) {
+        try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                onResult(false)
+                return@withContext
+            }
+            val currentFavorites = globalClass.preferencesManager.favorites.toMutableSet()
+            val isCurrentlyFavorited = currentFavorites.any { it == filePath }
+
+            if (isCurrentlyFavorited) {
+                currentFavorites.remove(filePath)
+                globalClass.preferencesManager.favorites = currentFavorites
+                onResult(true)
+            } else {
+                currentFavorites.add(filePath)
+                globalClass.preferencesManager.favorites = currentFavorites
                 onResult(true)
             }
         } catch (e: Exception) {
@@ -204,7 +254,6 @@ private suspend fun moveToTrash(
 
 private fun getMediaUri(contentResolver: ContentResolver, file: File): Uri? {
     val extension = file.extension.lowercase()
-    // Determine which collection to query based on file type
     val collection = when {
         isImage(extension) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -272,6 +321,27 @@ private fun formatDuration(millis: Long): String {
     }
 }
 
+// --- NEW, SAFER HELPER FUNCTION (NO PERMISSIONS NEEDED) ---
+private fun isExternalAudioDeviceActive(context: Context): Boolean {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        // Check for any Bluetooth, Wired, or USB audio output
+        devices.any {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+        }
+    } else {
+        // Deprecated but necessary for older phones
+        @Suppress("DEPRECATION")
+        audioManager.isBluetoothA2dpOn || audioManager.isBluetoothScoOn || audioManager.isWiredHeadsetOn
+    }
+}
+// --- END NEW ---
+
 // *** END OF HELPER FUNCTIONS ***
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -321,6 +391,7 @@ fun MediaViewerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isBookmarked by remember { mutableStateOf(false) }
+    var isFavorited by remember { mutableStateOf(false) }
     var currentFilePath by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -330,6 +401,71 @@ fun MediaViewerScreen(
     var showInfoDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // --- LIFECYCLE & PLAYER MANAGEMENT ---
+    val prefs = globalClass.preferencesManager
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val players = remember { mutableStateMapOf<Int, Player>() }
+
+    // This BroadcastReceiver listens for headphone/bluetooth plug/unplug events
+    val audioRouteReceiver = remember {
+        object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == AudioManager.ACTION_HEADSET_PLUG ||
+                    intent.action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
+
+                    val player = players[pagerState.currentPage] ?: return
+
+                    if (prefs.backgroundPlayMode == PreferencesManager.BACKGROUND_PLAY_BLUETOOTH && player.playWhenReady) {
+                        // Check if an external device is *still* active. If not, pause.
+                        if (!isExternalAudioDeviceActive(context)) {
+                            player.pause()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    DisposableEffect(context) {
+        val filter = IntentFilter(AudioManager.ACTION_HEADSET_PLUG)
+        filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        context.registerReceiver(audioRouteReceiver, filter)
+        onDispose {
+            context.unregisterReceiver(audioRouteReceiver)
+        }
+    }
+
+    // This observer handles onPause (Home button / screen lock)
+    DisposableEffect(lifecycleOwner, players, pagerState) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                val player = players[pagerState.currentPage] ?: return@LifecycleEventObserver
+
+                if (!player.playWhenReady) return@LifecycleEventObserver
+
+                when (prefs.backgroundPlayMode) {
+                    PreferencesManager.BACKGROUND_PLAY_OFF -> {
+                        player.pause()
+                    }
+                    PreferencesManager.BACKGROUND_PLAY_BLUETOOTH -> {
+                        if (!isExternalAudioDeviceActive(context)) {
+                            player.pause()
+                        }
+                    }
+                    PreferencesManager.BACKGROUND_PLAY_ALWAYS_ON -> {
+                        // Let it play
+                    }
+                }
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+    // --- END ---
 
     val windowInsetsController = remember(context) {
         (context as? Activity)?.window?.let { window ->
@@ -360,6 +496,9 @@ fun MediaViewerScreen(
             checkBookmarkStatus(currentFilePath) { bookmarked ->
                 isBookmarked = bookmarked
             }
+            checkFavoriteStatus(currentFilePath) { favorited ->
+                isFavorited = favorited
+            }
         }
     }
 
@@ -368,6 +507,9 @@ fun MediaViewerScreen(
             currentFilePath = currentMediaList[pagerState.settledPage].path
             checkBookmarkStatus(currentFilePath) { bookmarked ->
                 isBookmarked = bookmarked
+            }
+            checkFavoriteStatus(currentFilePath) { favorited ->
+                isFavorited = favorited
             }
             errorMessage = null
         }
@@ -410,7 +552,8 @@ fun MediaViewerScreen(
                     onToggleUI = { showUI = !showUI },
                     onError = { error ->
                         errorMessage = "Cannot load: ${file.name}"
-                    }
+                    },
+                    players = players
                 )
             }
         }
@@ -425,9 +568,8 @@ fun MediaViewerScreen(
             Box(Modifier.fillMaxSize()) {
                 TopOverlay(
                     modifier = Modifier.align(Alignment.TopCenter),
-                    currentPage = pagerState.currentPage,
-                    totalPages = currentMediaList.size,
                     isBookmarked = isBookmarked,
+                    isFavorited = isFavorited,
                     showThreeDotMenu = showThreeDotMenu,
                     onBack = onBack,
                     onBookmarkToggle = {
@@ -435,6 +577,15 @@ fun MediaViewerScreen(
                             toggleBookmark(currentFilePath) { success ->
                                 if (success) {
                                     isBookmarked = !isBookmarked
+                                }
+                            }
+                        }
+                    },
+                    onFavoriteToggle = {
+                        scope.launch {
+                            toggleFavorite(currentFilePath) { success ->
+                                if (success) {
+                                    isFavorited = !isFavorited
                                 }
                             }
                         }
@@ -600,12 +751,12 @@ fun MediaViewerScreen(
 @Composable
 private fun TopOverlay(
     modifier: Modifier = Modifier,
-    currentPage: Int,
-    totalPages: Int,
     isBookmarked: Boolean,
+    isFavorited: Boolean,
     showThreeDotMenu: Boolean,
     onBack: () -> Unit,
     onBookmarkToggle: () -> Unit,
+    onFavoriteToggle: () -> Unit,
     onThreeDotClick: () -> Unit,
     onDismissMenu: () -> Unit,
     onShare: () -> Unit,
@@ -629,6 +780,7 @@ private fun TopOverlay(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // --- LEFT SIDE ---
             IconButton(
                 onClick = onBack,
                 modifier = Modifier.size(48.dp)
@@ -640,17 +792,23 @@ private fun TopOverlay(
                     modifier = Modifier.size(28.dp)
                 )
             }
-            Text(
-                text = "${currentPage + 1} / $totalPages",
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
+
+            // --- RIGHT SIDE ---
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = onFavoriteToggle,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFavorited) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (isFavorited) "Remove favorite" else "Add favorite",
+                        tint = if (isFavorited) Color(0xFFE53935) else Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
                 IconButton(
                     onClick = onBookmarkToggle,
                     modifier = Modifier.size(48.dp)
@@ -719,6 +877,7 @@ private fun TopOverlay(
     }
 }
 
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaContent(
@@ -727,7 +886,8 @@ private fun MediaContent(
     pageIndex: Int,
     showUI: Boolean,
     onToggleUI: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    players: MutableMap<Int, Player>
 ) {
     if (!file.exists() || !file.canRead()) {
         onError("File not accessible")
@@ -753,7 +913,8 @@ private fun MediaContent(
                     pageIndex = pageIndex,
                     showUI = showUI,
                     onToggleUI = onToggleUI,
-                    onError = onError
+                    onError = onError,
+                    players = players
                 )
             }
             isAudio(extension) -> {
@@ -762,7 +923,8 @@ private fun MediaContent(
                     pagerState = pagerState,
                     pageIndex = pageIndex,
                     onToggleUI = onToggleUI,
-                    onError = onError
+                    onError = onError,
+                    players = players
                 )
             }
             else -> {
@@ -977,7 +1139,8 @@ private fun VideoPlayer(
     pageIndex: Int,
     showUI: Boolean,
     onToggleUI: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    players: MutableMap<Int, Player>
 ) {
     val context = LocalContext.current
     val exoPlayer = remember {
@@ -989,6 +1152,7 @@ private fun VideoPlayer(
                 playWhenReady = false
                 videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
             }
+            players[pageIndex] = player
             player
         } catch (e: Exception) {
             null
@@ -1007,12 +1171,13 @@ private fun VideoPlayer(
         var isPlayerRendered by remember { mutableStateOf(false) }
 
         var isActuallyPlaying by remember { mutableStateOf(exoPlayer.playWhenReady) }
-        var userPlayIntent by remember { mutableStateOf(false) }
+        var userPlayIntent by remember { mutableStateOf(exoPlayer.playWhenReady) } // <-- ICON SYNC FIX
 
         DisposableEffect(exoPlayer) {
             val listener = object : Player.Listener {
                 override fun onIsPlayingChanged(isPlayingChange: Boolean) {
                     isActuallyPlaying = isPlayingChange
+                    userPlayIntent = isPlayingChange // <-- ICON SYNC FIX
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1053,14 +1218,23 @@ private fun VideoPlayer(
             }
         }
 
+        // --- AUTOPLAY-ON-SWIPE FIX ---
         LaunchedEffect(pagerState.settledPage, pageIndex) {
             val isSettledPage = pagerState.settledPage == pageIndex
-            exoPlayer.playWhenReady = isSettledPage
-            userPlayIntent = isSettledPage
-            if (isSettledPage && exoPlayer.playbackState == Player.STATE_READY) {
+
+            if (isSettledPage) {
+                // When we swipe TO a new page, always play it.
+                exoPlayer.playWhenReady = true
+            } else {
+                // If we are swiping AWAY, always pause.
+                exoPlayer.pause()
+            }
+
+            if (isSettledPage && (exoPlayer.playbackState == Player.STATE_READY || exoPlayer.playbackState == Player.STATE_ENDED)) {
                 exoPlayer.seekTo(0)
             }
         }
+        // --- END FIX ---
 
         LaunchedEffect(Unit) {
             if (pagerState.currentPage == pageIndex) {
@@ -1072,6 +1246,7 @@ private fun VideoPlayer(
         DisposableEffect(Unit) {
             onDispose {
                 try {
+                    players.remove(pageIndex)
                     exoPlayer.stop()
                     exoPlayer.release()
                 } catch (e: Exception) {
@@ -1192,20 +1367,22 @@ private fun AudioPlayer(
     pagerState: PagerState,
     pageIndex: Int,
     onToggleUI: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    players: MutableMap<Int, Player>
 ) {
     val context = LocalContext.current
     val uri = Uri.fromFile(file)
 
-    // Reuse ExoPlayer for audio, but without SurfaceView
     val exoPlayer = remember {
         try {
-            ExoPlayer.Builder(context).build().apply {
+            val player = ExoPlayer.Builder(context).build().apply {
                 setMediaItem(MediaItem.fromUri(uri))
-                repeatMode = Player.REPEAT_MODE_OFF // Usually off for standard audio play, can be changed
+                repeatMode = Player.REPEAT_MODE_OFF
                 prepare()
                 playWhenReady = false
             }
+            players[pageIndex] = player
+            player
         } catch (e: Exception) {
             null
         }
@@ -1220,12 +1397,13 @@ private fun AudioPlayer(
         var currentVolume by remember { mutableStateOf(1f) }
 
         var isActuallyPlaying by remember { mutableStateOf(exoPlayer.playWhenReady) }
-        var userPlayIntent by remember { mutableStateOf(false) }
+        var userPlayIntent by remember { mutableStateOf(exoPlayer.playWhenReady) } // <-- ICON SYNC FIX
 
         DisposableEffect(exoPlayer) {
             val listener = object : Player.Listener {
                 override fun onIsPlayingChanged(isPlayingChange: Boolean) {
                     isActuallyPlaying = isPlayingChange
+                    userPlayIntent = isPlayingChange // <-- ICON SYNC FIX
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1254,16 +1432,19 @@ private fun AudioPlayer(
             }
         }
 
-        // Sync play state with pager swipe
+        // --- AUTOPLAY-ON-SWIPE FIX ---
         LaunchedEffect(pagerState.settledPage, pageIndex) {
             val isSettledPage = pagerState.settledPage == pageIndex
-            exoPlayer.playWhenReady = isSettledPage
-            userPlayIntent = isSettledPage
-            if (isSettledPage && exoPlayer.playbackState == Player.STATE_READY) {
-                // Optional: Auto-restart if returning to page
-                // exoPlayer.seekTo(0)
+
+            if (isSettledPage) {
+                // When we swipe TO a new page, always play it.
+                exoPlayer.playWhenReady = true
+            } else {
+                // If we are swiping AWAY, always pause.
+                exoPlayer.pause()
             }
         }
+        // --- END FIX ---
 
         LaunchedEffect(Unit) {
             if (pagerState.currentPage == pageIndex) {
@@ -1274,12 +1455,12 @@ private fun AudioPlayer(
 
         DisposableEffect(Unit) {
             onDispose {
+                players.remove(pageIndex)
                 exoPlayer.stop()
                 exoPlayer.release()
             }
         }
 
-        // AUDIO UI LAYOUT
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1288,11 +1469,10 @@ private fun AudioPlayer(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Center Icon for Audio
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
-                modifier = Modifier.offset(y = (-48).dp) // Shift up slightly to make room for controls
+                modifier = Modifier.offset(y = (-48).dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.MusicNote,
@@ -1313,7 +1493,6 @@ private fun AudioPlayer(
                 )
             }
 
-            // Controls are always visible for Audio (or use showUI if you prefer them to hide)
             UnifiedMediaControls(
                 isPlaying = userPlayIntent,
                 isMuted = isMuted,
@@ -1343,7 +1522,7 @@ private fun AudioPlayer(
                     currentPosition = seekPosition.toLong()
                 },
                 modifier = Modifier.fillMaxSize(),
-                alwaysVisibleGradient = true // Makes controls readable over any background
+                alwaysVisibleGradient = true
             )
         }
     } else {
@@ -1351,7 +1530,6 @@ private fun AudioPlayer(
     }
 }
 
-// REFACTORED: Shared controls for both Video and Audio
 @Composable
 private fun UnifiedMediaControls(
     modifier: Modifier = Modifier,
@@ -1372,7 +1550,6 @@ private fun UnifiedMediaControls(
     val durationAsFloat = remember(totalDuration) { totalDuration.toFloat().coerceAtLeast(1.0f) }
 
     Box(modifier = modifier) {
-        // Play/Pause Button in Center
         IconButton(
             onClick = onPlayPauseToggle,
             modifier = Modifier
@@ -1388,7 +1565,6 @@ private fun UnifiedMediaControls(
             )
         }
 
-        // Bottom Controls Bar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1416,7 +1592,6 @@ private fun UnifiedMediaControls(
                     modifier = Modifier.width(42.dp)
                 )
 
-                // Custom Seek Bar
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -1456,7 +1631,6 @@ private fun UnifiedMediaControls(
                         },
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    // Inactive track
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1467,7 +1641,6 @@ private fun UnifiedMediaControls(
                     val progress =
                         (if (isSeeking) seekPosition else currentPosition.toFloat()) / durationAsFloat
 
-                    // Active track
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(progress.coerceIn(0f, 1f))
@@ -1475,7 +1648,6 @@ private fun UnifiedMediaControls(
                             .background(Color.White)
                     )
 
-                    // Thumb
                     val thumbOffsetDp = with(density) {
                         (sliderContainerSize.width * progress.coerceIn(0f, 1f)).toDp() - 6.dp
                     }

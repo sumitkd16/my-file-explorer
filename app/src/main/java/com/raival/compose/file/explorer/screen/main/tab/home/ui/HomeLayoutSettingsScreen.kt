@@ -19,12 +19,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Favorite // <-- NEW IMPORT
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Category
-import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.History
+// import androidx.compose.material.icons.rounded.DeleteSweep // <-- REMOVED
+// import androidx.compose.material.icons.rounded.History // <-- REMOVED
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -275,25 +276,29 @@ fun HomeSectionItem(
     }
 }
 
+// --- THIS FUNCTION IS NOW FIXED ---
 fun HomeSectionType.getIcon(): ImageVector {
     return when (this) {
-        HomeSectionType.RECENT_FILES -> Icons.Rounded.History
+        // HomeSectionType.RECENT_FILES -> Icons.Rounded.History // <-- REMOVED
         HomeSectionType.CATEGORIES -> Icons.Rounded.Category
         HomeSectionType.STORAGE -> Icons.Rounded.Storage
         HomeSectionType.BOOKMARKS -> Icons.Rounded.Bookmarks
-        HomeSectionType.RECYCLE_BIN -> Icons.Rounded.DeleteSweep
+        HomeSectionType.FAVORITES -> Icons.Filled.Favorite // <-- NEW
         HomeSectionType.JUMP_TO_PATH -> Icons.Rounded.ArrowOutward
         HomeSectionType.PINNED_FILES -> PrismIcons.Pin
+        // RECYCLE_BIN was removed from the enum, so it's no longer needed here
     }
 }
 
+// --- THIS FUNCTION IS NOW FIXED ---
 fun HomeSectionType.getDescription(): String {
     return when (this) {
-        HomeSectionType.RECENT_FILES -> globalClass.getString(R.string.recently_modified_files)
+        // HomeSectionType.RECENT_FILES -> globalClass.getString(R.string.recently_modified_files) // <-- REMOVED
         HomeSectionType.CATEGORIES -> globalClass.getString(R.string.quick_access_categories)
         HomeSectionType.STORAGE -> globalClass.getString(R.string.storage_devices_and_locations)
         HomeSectionType.BOOKMARKS -> globalClass.getString(R.string.bookmarked_files_and_folders)
-        HomeSectionType.RECYCLE_BIN -> globalClass.getString(R.string.deleted_files)
+        HomeSectionType.FAVORITES -> globalClass.getString(R.string.favorited_files_and_folders) // <-- NEW (using the string you will add)
+        // HomeSectionType.RECYCLE_BIN -> globalClass.getString(R.string.deleted_files) // <-- REMOVED
         HomeSectionType.JUMP_TO_PATH -> globalClass.getString(R.string.quick_path_navigation)
         HomeSectionType.PINNED_FILES -> globalClass.getString(R.string.pinned_files_desc)
     }

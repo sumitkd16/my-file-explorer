@@ -459,4 +459,26 @@
     <string name="export_bookmarks_summary">Save all your bookmarks to a .json file</string>
     <string name="import_bookmarks">Import Bookmarks</string>
     <string name="import_bookmarks_summary">Load bookmarks from a backup file</string>
+
+
+    <string name="favorites">Favorites</string>
+    <string name="add_to_favorites">Add to favorites</string>
+    <string name="remove_from_favorites">Remove from favorites</string>
+    <string name="added_to_favorites">Added to favorites</string>
+    <string name="export_favorites">Export Favorites</string>
+    <string name="export_favorites_summary">Save all your favorites to a .json file</string>
+    <string name="import_favorites">Import Favorites</string>
+    <string name="import_favorites_summary">Load favorites from a backup file</string>
+
+    <string name="favorited_files_and_folders">Favorited files and folders</string>
+
+
+
+
+    <string name="media">Media</string>
+    <string name="background_play">Background play</string>
+    <string name="background_play_summary">Control audio/video playback when the app is in the background</string>
+    <string name="background_play_always_on">Always on</string>
+    <string name="background_play_off">Off</string>
+    <string name="background_play_bluetooth">Headphones or external speaker</string>
 </resources>

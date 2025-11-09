@@ -14,6 +14,7 @@ import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
@@ -285,15 +286,47 @@ fun FileOptionsMenuDialog(
                 }
             }
 
+            // --- THIS IS THE FIRST FIX ---
+            // Replaced "favorites" with VirtualFileHolder.FAVORITES
+            if (tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type == VirtualFileHolder.FAVORITES) {
+                FileOption(
+                    Icons.Rounded.Favorite,
+                    stringResource(R.string.remove_from_favorites)
+                ) {
+                    onDismissRequest()
+                    val toRemove = targetFiles.map { it.uniquePath }
+                    val newFavorites = globalClass.preferencesManager.favorites.filter {
+                        !toRemove.contains(it)
+                    }
+                    globalClass.preferencesManager.favorites = newFavorites.toSet()
+                    tab.unselectAllFiles()
+                    tab.reloadFiles()
+                }
+            }
+
+            // --- THIS IS THE SECOND FIX ---
+            // Replaced "favorites" with VirtualFileHolder.FAVORITES
             if (tab.activeFolder is LocalFileHolder ||
-                (tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type isNot VirtualFileHolder.BOOKMARKS)
+                (tab.activeFolder is VirtualFileHolder &&
+                        (tab.activeFolder as VirtualFileHolder).type isNot VirtualFileHolder.BOOKMARKS &&
+                        (tab.activeFolder as VirtualFileHolder).type isNot VirtualFileHolder.FAVORITES)
             ) {
+                // Add to Bookmarks
                 FileOption(Icons.Rounded.BookmarkAdd, stringResource(R.string.add_to_bookmarks)) {
                     onDismissRequest()
                     globalClass.preferencesManager.bookmarks += targetFiles.map { it.uniquePath }
                     globalClass.showMsg(R.string.added_to_bookmarks)
                     tab.unselectAllFiles()
                 }
+
+                // Add to Favorites
+                FileOption(Icons.Rounded.Favorite, stringResource(R.string.add_to_favorites)) {
+                    onDismissRequest()
+                    globalClass.preferencesManager.favorites += targetFiles.map { it.uniquePath }
+                    globalClass.showMsg(R.string.added_to_favorites)
+                    tab.unselectAllFiles()
+                }
+
                 val pinnedFiles by remember {
                     mutableStateOf(
                         globalClass.preferencesManager.pinnedFiles

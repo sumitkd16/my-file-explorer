@@ -28,7 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Delete
-// import androidx.compose.material.icons.rounded.DeleteSweep // <-- IMPORT REMOVED
+import androidx.compose.material.icons.rounded.Favorite // <-- NEW IMPORT
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +61,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHo
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.BOOKMARKS
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.FAVORITES // <-- NEW
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.raival.compose.file.explorer.screen.main.tab.home.data.HomeLayout
@@ -83,7 +84,6 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
 
     LaunchedEffect(tab.id) {
         withContext(Dispatchers.IO) {
-            // NOTE: Removed tab.fetchRecentFiles()
             async {
                 tab.getPinnedFiles()
             }
@@ -150,7 +150,7 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
     ) {
         enabledSections.forEach { section ->
             when (section.type) {
-                // REMOVED: HomeSectionType.RECENT_FILES
+                // RECENT_FILES has been removed
 
                 HomeSectionType.CATEGORIES -> {
                     CategoriesSection(tab = tab)
@@ -164,7 +164,13 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                     BookmarksSection(mainActivityManager = mainActivityManager)
                 }
 
-                // REMOVED: HomeSectionType.RECYCLE_BIN
+                // --- NEW ---
+                HomeSectionType.FAVORITES -> {
+                    FavoritesSection(mainActivityManager = mainActivityManager)
+                }
+                // --- END NEW ---
+
+                // RECYCLE_BIN has been removed
 
                 HomeSectionType.JUMP_TO_PATH -> {
                     JumpToPathSection(mainActivityManager = mainActivityManager)
@@ -174,7 +180,9 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                     PinnedFilesSection(tab = tab, mainActivityManager = mainActivityManager)
                 }
 
-                else -> {}
+                // --- MODIFIED ---
+                // Removed else block
+                // else -> {}
             }
         }
     }
@@ -254,7 +262,6 @@ fun PinnedFilesSection(
                             .padding(end = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // NOTE: Placeholder icons are used here to resolve previous unused imports/references.
                         Box(
                             modifier = Modifier
                                 .size(45.dp)
@@ -297,8 +304,6 @@ fun PinnedFilesSection(
         }
     }
 }
-
-// NOTE: Removed RecentFilesSection
 
 @Composable
 private fun CategoriesSection(
@@ -431,7 +436,39 @@ private fun BookmarksSection(
     }
 }
 
-// NOTE: Removed RecycleBinSection
+// --- NEW FAVORITES SECTION ---
+@Composable
+private fun FavoritesSection(
+    mainActivityManager: MainActivityManager
+) {
+    if (globalClass.preferencesManager.favorites.isNotEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .background(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                )
+                .border(
+                    width = 0.5.dp,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            SimpleNewTabViewItem(
+                title = stringResource(R.string.favorites),
+                imageVector = Icons.Rounded.Favorite
+            ) {
+                mainActivityManager.replaceCurrentTabWith(
+                    FilesTab(VirtualFileHolder(FAVORITES))
+                )
+            }
+        }
+    }
+}
+// --- END NEW ---
 
 @Composable
 private fun JumpToPathSection(

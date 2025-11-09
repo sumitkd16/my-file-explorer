@@ -45,6 +45,7 @@ import com.raival.compose.file.explorer.common.toJson
 import com.raival.compose.file.explorer.common.ui.SafeSurface
 import com.raival.compose.file.explorer.screen.preferences.ui.AppInfoContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.AppearanceContainer
+import com.raival.compose.file.explorer.screen.preferences.ui.BackgroundPlayContainer // <-- NEW IMPORT
 import com.raival.compose.file.explorer.screen.preferences.ui.BehaviorContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.FileListContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.FileOperationContainer
@@ -64,6 +65,10 @@ class PreferencesActivity : BaseActivity() {
 
     private lateinit var exportLauncher: ActivityResultLauncher<Intent>
     private lateinit var importLauncher: ActivityResultLauncher<Intent>
+
+    private lateinit var exportFavoritesLauncher: ActivityResultLauncher<Intent>
+    private lateinit var importFavoritesLauncher: ActivityResultLauncher<Intent>
+
     private val prefs by lazy { App.globalClass.preferencesManager }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,6 +91,22 @@ class PreferencesActivity : BaseActivity() {
             if (result.resultCode == Activity.RESULT_OK) {
                 result.data?.data?.let { uri ->
                     importBookmarks(uri)
+                }
+            }
+        }
+
+        exportFavoritesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                result.data?.data?.let { uri ->
+                    exportFavorites(uri)
+                }
+            }
+        }
+
+        importFavoritesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                result.data?.data?.let { uri ->
+                    importFavorites(uri)
                 }
             }
         }
@@ -134,6 +155,11 @@ class PreferencesActivity : BaseActivity() {
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         AppearanceContainer()
+
+                        // --- NEW CONTAINER IN CORRECT POSITION ---
+                        BackgroundPlayContainer()
+                        // --- END NEW ---
+
                         FileListContainer()
                         FileOperationContainer()
                         BehaviorContainer()
@@ -141,10 +167,11 @@ class PreferencesActivity : BaseActivity() {
                         TextEditorContainer()
                         AppInfoContainer()
 
-                        // This adds the new section at the bottom
                         BackupContainer(
                             onExportClick = { startExport() },
-                            onImportClick = { startImport() }
+                            onImportClick = { startImport() },
+                            onExportFavoritesClick = { startExportFavorites() },
+                            onImportFavoritesClick = { startImportFavorites() }
                         )
                     }
                 }
@@ -155,7 +182,9 @@ class PreferencesActivity : BaseActivity() {
     @Composable
     private fun BackupContainer(
         onExportClick: () -> Unit,
-        onImportClick: () -> Unit
+        onImportClick: () -> Unit,
+        onExportFavoritesClick: () -> Unit,
+        onImportFavoritesClick: () -> Unit
     ) {
         Column(
             modifier = Modifier.padding(top = 8.dp)
@@ -178,9 +207,22 @@ class PreferencesActivity : BaseActivity() {
                 icon = Icons.Rounded.Upload,
                 onClick = onImportClick
             )
+            PreferenceItem(
+                label = stringResource(id = R.string.export_favorites),
+                supportingText = stringResource(id = R.string.export_favorites_summary),
+                icon = Icons.Rounded.Download,
+                onClick = onExportFavoritesClick
+            )
+            PreferenceItem(
+                label = stringResource(id = R.string.import_favorites),
+                supportingText = stringResource(id = R.string.import_favorites_summary),
+                icon = Icons.Rounded.Upload,
+                onClick = onImportFavoritesClick
+            )
         }
     }
 
+    // --- Bookmarks Functions ---
     private fun startExport() {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -236,20 +278,89 @@ class PreferencesActivity : BaseActivity() {
 
                 val importedBookmarks = fromJson<Set<String>>(jsonString)
 
-                // --- MERGE LOGIC FIX ---
                 if (importedBookmarks != null) {
-                    // 1. Get the bookmarks already in the app
                     val currentBookmarks = prefs.bookmarks
-
-                    // 2. Combine the current set with the imported set
-                    // The '+' operator for Sets automatically handles duplicates
                     val combinedBookmarks = currentBookmarks + importedBookmarks
-
-                    // 3. Save the new, merged set
                     prefs.bookmarks = combinedBookmarks
 
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@PreferencesActivity, "Bookmarks imported and merged!", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    throw Exception("Failed to parse backup file.")
+                }
+
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PreferencesActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // --- Favorites Functions ---
+    private fun startExportFavorites() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(Intent.EXTRA_TITLE, "file-explorer-favorites.json")
+        }
+        exportFavoritesLauncher.launch(intent)
+    }
+
+    private fun startImportFavorites() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        importFavoritesLauncher.launch(intent)
+    }
+
+    private fun exportFavorites(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val favoritesSet = prefs.favorites
+                val jsonString = favoritesSet.toJson()
+
+                contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    OutputStreamWriter(outputStream).use { writer ->
+                        writer.write(jsonString)
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PreferencesActivity, "Favorites exported!", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PreferencesActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun importFavorites(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val jsonString = contentResolver.openInputStream(uri)?.use { inputStream ->
+                    BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                        reader.readText()
+                    }
+                }
+
+                if (jsonString.isNullOrBlank()) {
+                    throw Exception("File is empty or invalid.")
+                }
+
+                val importedFavorites = fromJson<Set<String>>(jsonString)
+
+                if (importedFavorites != null) {
+                    val currentFavorites = prefs.favorites
+                    val combinedFavorites = currentFavorites + importedFavorites
+                    prefs.favorites = combinedFavorites
+
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@PreferencesActivity, "Favorites imported and merged!", Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     throw Exception("Failed to parse backup file.")

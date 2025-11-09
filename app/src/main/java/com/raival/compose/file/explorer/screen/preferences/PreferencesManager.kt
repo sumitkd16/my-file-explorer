@@ -27,6 +27,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
 class PreferencesManager {
+
+    // --- NEW CONSTANTS ---
+    companion object {
+        const val BACKGROUND_PLAY_ALWAYS_ON = 0
+        const val BACKGROUND_PLAY_BLUETOOTH = 1
+        const val BACKGROUND_PLAY_OFF = 2
+    }
+    // --- END NEW ---
+
     val singleChoiceDialog = SingleChoiceDialog()
 
     //---------- Appearance -------------//
@@ -59,6 +68,15 @@ class PreferencesManager {
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
+
+    // --- NEW BACKGROUND PLAY PREFERENCE ---
+    // (I placed it here logically with other media-related settings)
+    var backgroundPlayMode by prefMutableState(
+        keyName = "backgroundPlayMode",
+        defaultValue = BACKGROUND_PLAY_ALWAYS_ON, // Default to "Always on"
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+    // --- END NEW ---
 
 
     //---------- File List -------------//
@@ -141,6 +159,12 @@ class PreferencesManager {
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
 
+    var favorites by prefMutableState(
+        keyName = "favorites",
+        defaultValue = emptySet(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
     var pinnedFiles by prefMutableState(
         keyName = "pinnedFiles",
         defaultValue = emptySet(),
@@ -159,13 +183,11 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
-    // --- NEW PROPERTY FOR SEARCH HISTORY ---
     var searchHistory by prefMutableState(
         keyName = "searchHistory",
         defaultValue = emptySet(),
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
-    // --- END OF NEW PROPERTY ---
 
     //---------- File Operation -------------//
     var signMergedApkBundleFiles by prefMutableState(

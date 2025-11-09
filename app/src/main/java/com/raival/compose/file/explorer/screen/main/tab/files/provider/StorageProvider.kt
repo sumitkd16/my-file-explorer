@@ -57,7 +57,10 @@ object StorageProvider {
             )
         }
 
-        storageDevices.add(getRoot(context))
+        // --- THIS IS THE FIX ---
+        // I have removed the "Root" option from the list to make the app safer.
+        // storageDevices.add(getRoot(context))
+        // --- END OF FIX ---
 
         return storageDevices
     }

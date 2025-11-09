@@ -210,17 +210,37 @@ class MainActivityManager {
                 // Clear search memory
                 globalClass.searchManager.clearAllState()
 
+                // Find the existing Home tab (it might be at any position due to reordering)
+                val existingHomeTabIndex = _state.value.tabs.indexOfFirst { it is HomeTab }
+
                 // Find and remove ghost tab
                 val ghostTabIndex = currentTabIndex - 1
+                var hasGhostTab = false
+
                 if (ghostTabIndex >= 0) {
                     val ghostTab = _state.value.tabs[ghostTabIndex]
                     if (ghostTab is FilesTab && ghostTab.isTemporaryForSearch) {
-                        // Remove ghost tab first
-                        removeTabAt(ghostTabIndex)
-                        // After removal, indices shift, so we don't need further adjustment
-                        return
+                        hasGhostTab = true
                     }
                 }
+
+                if (hasGhostTab) {
+                    // Remove ghost tab first, then search tab
+                    removeTabAt(ghostTabIndex)
+                    // After ghost removal, search tab is now at ghostTabIndex
+                    removeTabAt(ghostTabIndex)
+                } else {
+                    // No ghost tab, just remove search tab
+                    removeTabAt(currentTabIndex)
+                }
+
+                // Now select the existing Home tab
+                // Need to recalculate its index after removals
+                val newHomeTabIndex = _state.value.tabs.indexOfFirst { it is HomeTab }
+                if (newHomeTabIndex >= 0) {
+                    selectTabAt(newHomeTabIndex)
+                }
+                return
             }
         }
         // --- END VERSION 1 LOGIC ---

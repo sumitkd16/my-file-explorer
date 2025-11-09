@@ -453,4 +453,10 @@
     <string name="close_tab_on_back_nav">Back navigation to close tabs</string>
     <string name="remember_last_session">Remember last session</string>
     <string name="confirm_before_exit">Confirm before exiting the app</string>
+
+    <string name="backup_and_restore">Backup &amp; Restore</string>
+    <string name="export_bookmarks">Export Bookmarks</string>
+    <string name="export_bookmarks_summary">Save all your bookmarks to a .json file</string>
+    <string name="import_bookmarks">Import Bookmarks</string>
+    <string name="import_bookmarks_summary">Load bookmarks from a backup file</string>
 </resources>

@@ -57,10 +57,9 @@ class FilesTab(
     companion object {
         fun isValidLocalPath(path: String) = File(path).exists()
 
-        // Performance constants
-        private const val PAGE_SIZE = 1000 // Load files in chunks of 100
-        private const val INITIAL_LOAD_SIZE = 1000 // Initial visible files
-        private const val LOAD_THRESHOLD = 50 // Load more when 50 items from end
+        private const val PAGE_SIZE = 1000
+        private const val INITIAL_LOAD_SIZE = 1000
+        private const val LOAD_THRESHOLD = 50
     }
 
     override val id = globalClass.generateUid()
@@ -75,7 +74,6 @@ class FilesTab(
     val contentListStates = hashMapOf<String, LazyGridState>()
     var activeListState by mutableStateOf(LazyGridState())
 
-    // Performance: Pagination state
     private var allFolderContent = mutableListOf<ContentHolder>()
     private var currentPage = 0
     var isLoadingMore = false
@@ -97,11 +95,9 @@ class FilesTab(
     var categories = mutableStateListOf<FileListCategory>()
     var selectedCategory by mutableStateOf<FileListCategory?>(null)
 
-    // Holds the file that has been long-clicked
     var targetFile: ContentHolder? = null
     var compressTaskHolder: CompressTask? = null
 
-    // Used to detect changes to an already updated ZipTree in ZipManager
     var zipSourceTimestamp = -1L
 
     private val _dialogsState = MutableStateFlow(DialogsState())
@@ -115,11 +111,12 @@ class FilesTab(
 
     var isLoading by mutableStateOf(false)
 
+    var isTemporaryForSearch by mutableStateOf(false)
+
     private var foldersCount = 0
     private var filesCount = 0
 
     init {
-        // If the tab point to a file, open it immediately without waiting for its parent content to be loaded
         if (source.isFile()) {
             context?.let { openFile(context, source) }
         }
@@ -127,13 +124,10 @@ class FilesTab(
 
     override fun onTabStarted() {
         super.onTabStarted()
-        // Load either the source file or the home tab
         scope.launch {
-            if (source.isFile()) { // This is true when locating a file
-                // Check if we can access the parent folder and open it
+            if (source.isFile()) {
                 source.getParent()?.let { parent ->
                     openFolderImpl(parent) {
-                        // Scroll to the file once the content has been loaded
                         CoroutineScope(Dispatchers.Main).launch {
                             getFileListState().scrollToItem(
                                 maxOf(
@@ -145,30 +139,33 @@ class FilesTab(
                         }
                     }
                 } ?: also {
-                    // If parent folder cannot be accessed, revert to home folder
                     openFolderImpl(homeDir)
                 }
 
-                // Highlight the opened file
                 highlightedFiles.apply {
                     clear()
                     add(source.uniquePath)
                 }
             } else {
-                // If the source file is a folder, open it
                 openFolderImpl(homeDir)
             }
         }
     }
 
+    // --- FIXED VERSION USING VERSION 1 LOGIC ---
     override fun onTabResumed() {
+        super.onTabResumed()
+
+        // VERSION 1 LOGIC: Check if this is a ghost tab (back button case)
+        if (isTemporaryForSearch && globalClass.searchManager.searchQuery.text.isEmpty()) {
+            globalClass.mainActivityManager.closeCurrentTabAndRevertToHome()
+            return
+        }
+
         scope.launch {
             validateActiveFolder()
-            // Important to clear any information from previous tabs (when switching tabs)
             requestHomeToolbarUpdate()
-            // Detect any content changes
             detectFileChanges()
-            // Check for display mode change
             updateDisplayConfig()
         }
     }
@@ -240,10 +237,6 @@ class FilesTab(
         return false
     }
 
-    /**
-     * Unselects all the selected files.
-     * returns true if any files were selected
-     */
     fun unselectAnySelectedFiles(): Boolean {
         if (selectedFiles.isNotEmpty()) {
             unselectAllFiles()
@@ -251,7 +244,6 @@ class FilesTab(
         }
         return false
     }
-
 
     fun unselectAllFiles(quickReload: Boolean = true) {
         selectedFiles.clear()
@@ -289,86 +281,64 @@ class FilesTab(
         rememberSelectedFiles: Boolean = false,
         postEvent: () -> Unit = {}
     ) {
-        // Block UI
         if (isLoading) return
 
-        // Prevent opening invalid files
         if (!item.isValid()) return
 
-        // For virtual folders, update the category
         if (item is VirtualFileHolder) {
             item.selectedCategory = selectedCategory
         }
 
-        // Switch to the new folder
         activeFolder = item
 
-        // Reset pagination state for new folder
         resetPagination()
 
-        // Update header label
         withContext(Dispatchers.Main) {
             tabViewLabel = createTabLabel()
         }
 
-        // Clear selection if not needed
         if (!rememberSelectedFiles) {
             selectedFiles.clear()
             lastSelectedFileIndex = -1
         } else {
-            // Otherwise, validate the selection
             selectedFiles.removeIf { key, value -> runBlocking { !value.isValid() } }
             if (selectedFiles.isEmpty()) lastSelectedFileIndex = -1
         }
 
-        // Update the bottom bar options to fit the new folder
         _bottomOptionsBarState.update {
             it.copy(
                 showQuickOptions = selectedFiles.isNotEmpty(),
                 showCreateNewContentButton = activeFolder.canAddNewContent,
                 showMoreOptionsButton = selectedFiles.isNotEmpty(),
-                showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
-                        ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
-                                activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
+                showEmptyRecycleBinButton = false
             )
         }
 
-        // Check if the back gesture can be handled
         handleBackGesture = runBlocking {
             selectedFiles.isNotEmpty() || (activeFolder.hasParent() && !shouldNavigateToParentTab())
         }
 
-        // Update the path list
         updatePathList()
 
-        // Update the zipSourceTimestamp if the active folder is a zip file
         if (activeFolder is ZipFileHolder) {
             zipSourceTimestamp = (activeFolder as ZipFileHolder).zipTree.timeStamp
         }
 
-        // Get the content of the new folder with pagination
-        listFilesWithPagination { newContent -> // Main thread
-            // Update the active folder content
+        listFilesWithPagination { newContent ->
             activeFolderContent.clear()
             activeFolderContent.addAll(newContent)
 
-            // Once the content has been loaded, update the home toolbar title and subtitle
             requestHomeToolbarUpdate()
 
-            // If a new folder is opened, the list must be at the starting position,
-            // but when navigating back to parent folder, the saved location must be maintained
             if (!rememberListState) {
                 contentListStates[item.uniquePath] = LazyGridState(0, 0)
             }
 
-            // Update the active list state
             activeListState = contentListStates[item.uniquePath] ?: LazyGridState()
                 .also { contentListStates[item.uniquePath] = it }
 
-            // Get display config for this folder
             updateDisplayConfig()
 
-            // Update the categories
             if (activeFolder is VirtualFileHolder) {
                 categories.clear()
                 categories.addAll((activeFolder as VirtualFileHolder).getCategories())
@@ -377,12 +347,10 @@ class FilesTab(
                 showCategories = false
             }
 
-            // Call any posted events
             postEvent()
         }
     }
 
-    // Performance: Reset pagination state when changing folders
     private fun resetPagination() {
         allFolderContent.clear()
         currentPage = 0
@@ -390,7 +358,6 @@ class FilesTab(
         hasMoreContent = true
     }
 
-    // Performance: Load more files when scrolling
     fun loadMoreFilesIfNeeded(currentIndex: Int) {
         if (isLoadingMore || !hasMoreContent) return
 
@@ -402,7 +369,6 @@ class FilesTab(
         }
     }
 
-    // Performance: Load next page of files
     private suspend fun loadMoreFiles() {
         if (isLoadingMore || !hasMoreContent) return
 
@@ -438,7 +404,6 @@ class FilesTab(
 
     suspend fun validateActiveFolder() {
         if (!activeFolder.isValid()) {
-            // Try to find a valid parent folder
             var validParent: ContentHolder? = null
             var current = activeFolder
 
@@ -463,20 +428,16 @@ class FilesTab(
     }
 
     suspend fun detectFileChanges(): Boolean {
-        // terminate the check if the tab is busy
         if (isLoading) return false
 
-        // check if any file has been changed
         if (activeFolder is VirtualFileHolder) {
             validateBookmarks()
             validateSearchResult()
             val newContent = (activeFolder as VirtualFileHolder).listContent()
-            // Check if the content size has changed
             if (newContent.size != allFolderContent.size) {
                 reloadFiles()
                 return true
             }
-            // Check each file to see if the source has changed
             if (allFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
                 reloadFiles()
                 return true
@@ -489,12 +450,10 @@ class FilesTab(
                             removeIf { it.name.startsWith(".") }
                         }
                     }
-            // Check if the content size has changed
             if (newContent != null && newContent.size != allFolderContent.size) {
                 reloadFiles()
                 return true
             }
-            // Check each file to see if the source has changed
             if (allFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
                 reloadFiles()
                 return true
@@ -504,7 +463,6 @@ class FilesTab(
             if (invalidZipTrees.contains((activeFolder as ZipFileHolder).zipTree.source.uniquePath)) {
                 validateActiveFolder()
             } else if (globalClass.zipManager.checkForSourceChanges()) {
-                // Check if the source any of the files that have been extracted has changed
                 val zipTree = (activeFolder as ZipFileHolder).zipTree
                 val changedFiles = zipTree.checkExtractedFiles()
                 if (changedFiles.isNotEmpty()) {
@@ -555,33 +513,25 @@ class FilesTab(
 
     fun quickReloadFiles() {
         scope.launch {
-            // terminate if the tab is busy
             if (isLoading) return@launch
 
-            // Put the content in a temporary list
             val temp = arrayListOf<ContentHolder>().apply { addAll(activeFolderContent) }
 
-            // Recheck the back gesture
             handleBackGesture = selectedFiles.isNotEmpty()
                     || (activeFolder.hasParent() && !shouldNavigateToParentTab())
 
-            // Update the bottom bar options
             _bottomOptionsBarState.update {
                 it.copy(
                     showQuickOptions = selectedFiles.isNotEmpty(),
                     showMoreOptionsButton = selectedFiles.isNotEmpty(),
-                    showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
-                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
-                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
+                    showEmptyRecycleBinButton = false
                 )
             }
 
             withContext(Dispatchers.Main) {
-                // Reload the list
                 activeFolderContent.clear()
                 activeFolderContent.addAll(temp)
 
-                // Update title and subtitle
                 requestHomeToolbarUpdate()
             }
         }
@@ -589,22 +539,17 @@ class FilesTab(
 
     fun onSelectionChange() {
         scope.launch {
-            // Recheck the back gesture
             handleBackGesture =
                 selectedFiles.isNotEmpty() || (activeFolder.hasParent() && !shouldNavigateToParentTab())
 
-            // Update the bottom bar options
             _bottomOptionsBarState.update {
                 it.copy(
                     showQuickOptions = selectedFiles.isNotEmpty(),
                     showMoreOptionsButton = selectedFiles.isNotEmpty(),
-                    showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
-                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
-                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
+                    showEmptyRecycleBinButton = false
                 )
             }
 
-            // Update title and subtitle
             requestHomeToolbarUpdate()
         }
     }
@@ -615,11 +560,9 @@ class FilesTab(
         }
     }
 
-    // Performance: Enhanced file listing with pagination
     private suspend fun listFilesWithPagination(onReady: (ArrayList<out ContentHolder>) -> Unit) {
         isLoading = true
 
-        // Load all files first (this is still needed for counting and search)
         val allContent = activeFolder.listSortedContent()
         allFolderContent.clear()
         allFolderContent.addAll(allContent)
@@ -629,10 +572,9 @@ class FilesTab(
             filesCount = contentCount.files
         }
 
-        // Load initial page
         val initialContent = ArrayList(allFolderContent.take(INITIAL_LOAD_SIZE))
         hasMoreContent = allFolderContent.size > INITIAL_LOAD_SIZE
-        currentPage = 1 // Next page to load
+        currentPage = 1
 
         withContext(Dispatchers.Main) {
             onReady(initialContent)
@@ -640,12 +582,10 @@ class FilesTab(
         }
     }
 
-    // Keep original for backward compatibility
     private suspend fun listFiles(onReady: (ArrayList<out ContentHolder>) -> Unit) {
         listFilesWithPagination(onReady)
     }
 
-    // Called when a new file/folder is created
     fun onNewFileCreated(newFile: ContentHolder, openFolder: Boolean = false) {
         scope.launch {
             if (openFolder) {
@@ -682,24 +622,20 @@ class FilesTab(
     }
 
     private suspend fun updatePathList() {
-        // Walk through parent files
         val paths = generateSequence(activeFolder) {
             runBlocking { it.getParent() }
         }
 
-        // Filter those that accessible, reverse the list
         val newPathSegments =
             paths.filter { it.canRead && runBlocking { it.isValid() } }.toList().reversed()
 
         if (!currentPathSegments.joinToString(emptyString) { it.displayName }.startsWith(
                 newPathSegments.joinToString(emptyString) { it.displayName })
         ) {
-            // Update the state to reflect the new path
             withContext(Dispatchers.Main) {
                 currentPathSegments = newPathSegments
             }
         } else {
-            // validate path segments if not changed
             currentPathSegments = currentPathSegments.filter { it.isValid() }
         }
 
@@ -714,10 +650,6 @@ class FilesTab(
         globalClass.mainActivityManager.addTabAndSelect(tab)
     }
 
-    /**
-     * Shares the selected files.
-     * Only local content can be shared, other types must create a local copy first.
-     */
     fun shareSelectedFiles(context: Context) {
         val uris = arrayListOf<Uri>()
 
@@ -844,8 +776,21 @@ class FilesTab(
         _dialogsState.update { it.copy(showViewConfigDialog = show) }
     }
 
+    // --- FIXED VERSION USING VERSION 1 LOGIC ---
     fun toggleSearchPenal(show: Boolean) {
         _dialogsState.update { it.copy(showSearchPenal = show) }
+
+        // VERSION 1 LOGIC: Only close ghost tab if dialog is closing AND no search was done
+        if (!show && isTemporaryForSearch) {
+            val searchManager = globalClass.searchManager
+
+            if (searchManager.searchQuery.text.isEmpty() && searchManager.searchResults.isEmpty()) {
+                globalClass.mainActivityManager.closeCurrentTabAndRevertToHome()
+            }
+        }
+
+        // DO NOT clear the isTemporaryForSearch flag here
+        // This allows onTabResumed to properly detect ghost tabs
     }
 
     fun toggleRenameDialog(show: Boolean) {

@@ -25,7 +25,7 @@ import androidx.compose.material.icons.rounded.FileCopy
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Search
+// import androidx.compose.material.icons.rounded.Search  <-- IMPORT NO LONGER NEEDED
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -173,9 +173,13 @@ fun BottomOptionsBar(tab: FilesTab) {
             }
         }
 
+        // --- SEARCH BUTTON REMOVED ---
+        /*
         BottomOptionsBarButton(Icons.Rounded.Search, stringResource(R.string.search)) {
             tab.toggleSearchPenal(true)
         }
+        */
+        // --- END OF REMOVAL ---
 
         if (!state.showEmptyRecycleBinButton && state.showCreateNewContentButton) {
             BottomOptionsBarButton(Icons.Rounded.Add, stringResource(R.string.create)) {

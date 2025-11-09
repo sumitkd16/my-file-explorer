@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.RemoveRedEye
+import androidx.compose.material.icons.rounded.Search // <-- IMPORT ADDED
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ViewComfy
 import androidx.compose.material3.DropdownMenu
@@ -52,7 +53,8 @@ fun Toolbar(
     title: String,
     subtitle: String,
     onToggleAppInfoDialog: (Boolean) -> Unit,
-    hasNewUpdate: Boolean
+    hasNewUpdate: Boolean,
+    onSearchClicked: () -> Unit // <-- PARAMETER ADDED
 ) {
     Row(
         modifier = Modifier
@@ -101,6 +103,16 @@ fun Toolbar(
                 )
             }
         }
+
+        // --- THIS IS THE NEW SEARCH ICON ---
+        IconButton(onClick = { onSearchClicked() }) {
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = stringResource(R.string.search)
+            )
+        }
+        // --- END OF NEW ICON ---
+
         MoreOptionsButton()
     }
 }

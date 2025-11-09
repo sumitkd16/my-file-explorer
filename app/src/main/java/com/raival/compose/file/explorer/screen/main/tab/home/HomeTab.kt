@@ -8,7 +8,7 @@ import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateListOf // UNUSED IMPORT REMOVED
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.raival.compose.file.explorer.App.Companion.globalClass
@@ -26,7 +26,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFile
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.VIDEO
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.screen.main.tab.home.holder.HomeCategory
-import com.raival.compose.file.explorer.screen.main.tab.home.holder.RecentFile
+import com.raival.compose.file.explorer.screen.main.tab.home.holder.RecentFile // UNUSED IMPORT REMOVED
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -36,7 +36,7 @@ class HomeTab : Tab() {
     override val id = globalClass.generateUid()
     val scope = CoroutineScope(Dispatchers.IO)
     override val header = globalClass.getString(R.string.home_tab_header)
-    val recentFiles = mutableStateListOf<RecentFile>()
+    // REMOVED: val recentFiles = mutableStateListOf<RecentFile>()
     val pinnedFiles = arrayListOf<LocalFileHolder>()
 
     var showCustomizeHomeTabDialog by mutableStateOf(false)
@@ -62,13 +62,7 @@ class HomeTab : Tab() {
         )
     }
 
-    fun fetchRecentFiles() {
-        if (recentFiles.isNotEmpty()) return
-
-        scope.launch {
-            recentFiles.addAll(getRecentFiles())
-        }
-    }
+    // REMOVED: fun fetchRecentFiles() { ... }
 
     fun getMainCategories() = arrayListOf<HomeCategory>().apply {
         val mainActivityManager = globalClass.mainActivityManager

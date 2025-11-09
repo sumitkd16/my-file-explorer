@@ -32,7 +32,7 @@ class PreferencesManager {
     //---------- Appearance -------------//
     var theme by prefMutableState(
         keyName = "theme",
-        defaultValue = ThemePreference.SYSTEM.ordinal,
+        defaultValue = ThemePreference.DARK.ordinal,
         getPreferencesKey = { intPreferencesKey(it) }
     )
 
@@ -158,6 +158,14 @@ class PreferencesManager {
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
+
+    // --- NEW PROPERTY FOR SEARCH HISTORY ---
+    var searchHistory by prefMutableState(
+        keyName = "searchHistory",
+        defaultValue = emptySet(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+    // --- END OF NEW PROPERTY ---
 
     //---------- File Operation -------------//
     var signMergedApkBundleFiles by prefMutableState(

@@ -23,6 +23,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.EXTERNAL_STORAGE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.ROOT
+import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchOptions // <-- THIS IS THE FIX
 import com.raival.compose.file.explorer.screen.main.tab.home.holder.RecentFile
 import java.io.File
 
@@ -481,5 +482,94 @@ object StorageProvider {
 
     fun getSearchResult(): ArrayList<ContentHolder> {
         return globalClass.searchManager.searchResults.map { it.file } as ArrayList<ContentHolder>
+    }
+
+    // ----------------------------------------------------------------
+    // --- THIS IS THE "Google Files" SEARCH FUNCTION ---
+    // ----------------------------------------------------------------
+    /**
+     * Performs a fast, global search using MediaStore, similar to Google Files.
+     * This searches the entire "external" storage, which includes Internal Storage.
+     */
+    fun globalSearchByFilename(
+        query: String,
+        options: SearchOptions
+    ): ArrayList<LocalFileHolder> {
+        val files = ArrayList<LocalFileHolder>()
+        val contentResolver: ContentResolver = globalClass.contentResolver
+
+        val uri: Uri = MediaStore.Files.getContentUri("external")
+
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns.DATA
+        )
+
+        // --- Build Selection ---
+        val selectionClauses = mutableListOf<String>()
+        val selectionArgsList = mutableListOf<String>()
+
+        // 1. The Search Query (handles ignoreCase)
+        val (queryClause, queryArg) = if (options.ignoreCase) {
+            "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?" to "%${query.lowercase()}%"
+        } else {
+            "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?" to "%$query%"
+        }
+        selectionClauses.add(queryClause)
+        selectionArgsList.add(queryArg)
+
+        // 2. --- THIS IS THE FIX ---
+        //    We no longer exclude directories. This will return BOTH files and folders.
+
+        // 3. (Optional) Handle Search by Extension
+        if (options.searchByExtension) {
+            val (extClause, extArg) = if (options.ignoreCase) {
+                "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?" to "%.${query.lowercase()}"
+            } else {
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?" to "%.${query}"
+            }
+            // Replace the original query clause with the extension one
+            selectionClauses[0] = extClause
+            selectionArgsList[0] = extArg
+        }
+
+        // --- Combine Selection ---
+        val selection = selectionClauses.joinToString(" AND ")
+        val selectionArgs = selectionArgsList.toTypedArray()
+
+        // --- Apply Limit ---
+        val queryUri = uri.buildUpon().apply {
+            if (options.maxResults > 0) { // Check for -1 (unlimited)
+                appendQueryParameter("limit", options.maxResults.toString())
+            }
+        }.build()
+
+        // --- Sort Order ---
+        val sortOrder = "${MediaStore.Files.FileColumns.DISPLAY_NAME} ASC"
+
+        try {
+            val cursor: Cursor? = contentResolver.query(
+                queryUri,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )
+
+            cursor?.use {
+                val pathColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+
+                while (it.moveToNext()) {
+                    val path = it.getString(pathColumn)
+                    if (!path.isNullOrEmpty()) {
+                        files.add(LocalFileHolder(File(path)))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Handle query exceptions, e.g., bad regex (though we aren't using regex here)
+            // Or permission issues
+        }
+
+        return files
     }
 }

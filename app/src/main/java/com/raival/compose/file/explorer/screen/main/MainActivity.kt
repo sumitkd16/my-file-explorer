@@ -155,7 +155,8 @@ class MainActivity : BaseActivity() {
                                 title = mainActivityState.title,
                                 subtitle = mainActivityState.subtitle,
                                 hasNewUpdate = mainActivityState.hasNewUpdate,
-                                onToggleAppInfoDialog = { mainActivityManager.toggleAppInfoDialog(it) }
+                                onToggleAppInfoDialog = { mainActivityManager.toggleAppInfoDialog(it) },
+                                onSearchClicked = { globalClass.mainActivityManager.onSearchClicked() } // <-- THIS LINE IS ADDED
                             )
                         }
                         TabLayout(

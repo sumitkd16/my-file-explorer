@@ -220,38 +220,39 @@ fun FilesListGrid(tab: FilesTab) {
     val context = LocalContext.current
     val mediaFiles = tab.activeFolderContent.filter { isMediaFile(it.getFileExtension()) }.map { it.toFileItem() }
 
-    // Calculate optimal column count based on screen size and gallery mode
     val optimalColumnCount = if (tab.viewConfig.galleryMode) {
-        // For gallery mode, use more columns for better density
         calculateOptimalColumnCount()
     } else {
-        // For regular grid, use standard column count
         tab.viewConfig.columnCount
     }
 
-    // Performance: Use rememberLazyGridState for better control
     val lazyGridState = rememberLazyGridState()
 
-    // Performance: Load more files when scrolling near the end
     LaunchedEffect(lazyGridState.firstVisibleItemIndex) {
         val visibleItems = lazyGridState.layoutInfo.visibleItemsInfo
         if (visibleItems.isNotEmpty()) {
             val lastVisibleIndex = visibleItems.last().index
             val totalItems = tab.activeFolderContent.size
 
-            // Load more if we're near the end and there might be more content
-            if (lastVisibleIndex >= totalItems - 20) { // Load when 20 items from end
+            if (lastVisibleIndex >= totalItems - 20) {
                 tab.loadMoreFilesIfNeeded(lastVisibleIndex)
             }
         }
+    }
+
+    // Conditional spacing based on whether names are shown
+    val gridSpacing = if (tab.viewConfig.galleryMode && tab.viewConfig.hideMediaNames) {
+        0.5.dp  // Ultra-minimal gap when names are hidden
+    } else {
+        1.dp    // Slightly more gap when names are shown (but still minimal)
     }
 
     LazyVerticalGrid(
         state = lazyGridState,
         columns = GridCells.Fixed(optimalColumnCount),
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(gridSpacing),
+        horizontalArrangement = Arrangement.spacedBy(gridSpacing)
     ) {
         itemsIndexed(
             tab.activeFolderContent,
@@ -277,7 +278,6 @@ fun FilesListGrid(tab: FilesTab) {
             )
         }
 
-        // Performance: Show loading indicator at the bottom when loading more
         if (tab.isLoadingMore) {
             item {
                 Box(
@@ -297,11 +297,9 @@ fun FilesListGrid(tab: FilesTab) {
     }
 }
 
-// Calculate optimal column count based on screen density
 @Composable
 private fun calculateOptimalColumnCount(): Int {
-    // For gallery mode, aim for 3-5 columns depending on screen size
-    return 3 // As per your suggestion - 3 columns for better thumbnail size
+    return 3
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -322,13 +320,11 @@ private fun ColumnFileItem(
     var fileDetails by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
 
-    // Load bookmark status and file details
     LaunchedEffect(currentItemPath) {
         checkBookmarkStatus(currentItemPath) { bookmarked ->
             isBookmarked = bookmarked
         }
 
-        // Load file details in background
         coroutineScope.launch {
             val details = withContext(Dispatchers.IO) {
                 item.getDetails()
@@ -400,12 +396,11 @@ private fun GridFileItem(
     viewConfigs: ViewConfigs,
     mediaFiles: List<FileItem>,
     initialPosition: Int,
-    columnCount: Int = 3 // Default to 3 columns as per your preference
+    columnCount: Int = 3
 ) {
     var isBookmarked by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Load bookmark status
     LaunchedEffect(itemPath) {
         checkBookmarkStatus(itemPath) { bookmarked ->
             isBookmarked = bookmarked
@@ -445,11 +440,10 @@ private fun GridFileItem(
         onSelection(true)
     }
 
-    // Calculate optimal padding based on column count
-    val itemPadding = when (columnCount) {
-        in 1..3 -> 4.dp  // More space for fewer columns
-        in 4..5 -> 2.dp  // Less space for more columns
-        else -> 1.dp     // Minimal space for many columns
+    val itemPadding = if (viewConfigs.galleryMode && viewConfigs.hideMediaNames) {
+        0.dp
+    } else {
+        2.dp
     }
 
     Box(
@@ -460,7 +454,6 @@ private fun GridFileItem(
                 onClick = { handleClick() },
                 onLongClick = { handleLongClick() }
             )
-            .padding(itemPadding)
             .background(
                 color = if (isSelected) {
                     MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 1f)
@@ -469,38 +462,34 @@ private fun GridFileItem(
                 } else {
                     Color.Unspecified
                 },
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(if (viewConfigs.galleryMode && viewConfigs.hideMediaNames) 0.dp else 4.dp)
             )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(4.dp),
+                .padding(itemPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Image/Icon container - optimized for better space usage
             Box(
                 modifier = if (viewConfigs.galleryMode) Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(2.dp)
                 else Modifier
                     .size((getFileListIconSize(tab.activeFolder) * 2).dp)
             ) {
                 FileIcon(
                     item = item,
                     size = if (viewConfigs.galleryMode) {
-                        // Use larger size for gallery mode to fill available space
-                        120.dp // Increased from previous smaller size
+                        120.dp
                     } else {
-                        (getFileListIconSize(tab.activeFolder) * 1.8).dp // Slightly larger for regular grid
+                        (getFileListIconSize(tab.activeFolder) * 1.8).dp
                     },
                     viewConfigs = viewConfigs,
                     onClick = { handleClick() },
                     onLongClick = { handleLongClick() }
                 )
 
-                // Bookmark indicator for grid
                 if (isBookmarked) {
                     Icon(
                         modifier = Modifier
@@ -531,11 +520,10 @@ private fun GridFileItem(
                 }
             }
 
-            // File name - only show if not in gallery mode or if media names are not hidden
             if (!viewConfigs.galleryMode || (viewConfigs.galleryMode && !viewConfigs.hideMediaNames)) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
+
                 val fontSize = if (viewConfigs.galleryMode) {
-                    // Slightly smaller font for gallery mode to save space
                     getFileListFontSize(tab.activeFolder) * 0.7
                 } else {
                     getFileListFontSize(tab.activeFolder) * 0.8
@@ -554,14 +542,15 @@ private fun GridFileItem(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp)
                 )
             }
         }
     }
 }
 
-// Function to open media files with our swipe viewer
 private fun openMediaFileWithSwipe(context: Context, item: ContentHolder, mediaFiles: List<FileItem>, initialPosition: Int) {
     val intent = Intent(context, MediaViewerActivity::class.java).apply {
         putParcelableArrayListExtra("media_files", ArrayList<FileItem>(mediaFiles))
@@ -596,18 +585,15 @@ private fun handleLongClick(
     val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
     val isNewSelection = !isAlreadySelected
 
-    // Always add the item to selection on long click
     if (isNewSelection) {
         tab.selectedFiles[currentItemPath] = item
         tab.lastSelectedFileIndex = index
         tab.onSelectionChange()
     }
 
-    // Show file options menu
     tab.toggleFileOptionsMenu(item)
 }
 
-// Bookmark helper function
 private suspend fun checkBookmarkStatus(filePath: String, onResult: (Boolean) -> Unit) {
     withContext(Dispatchers.IO) {
         try {

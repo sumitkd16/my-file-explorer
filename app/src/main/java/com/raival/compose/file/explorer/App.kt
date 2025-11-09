@@ -69,12 +69,7 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
                 .apply { if (!exists()) mkdirs() }
         )
 
-    val recycleBinDir: LocalFileHolder
-        get() = LocalFileHolder(
-            File(
-                appFiles.file,
-                "bin"
-            ).apply { mkdirs() })
+    // --- RECYCLE BIN DIR REMOVED ---
 
     private var uid = AtomicInteger(0)
 

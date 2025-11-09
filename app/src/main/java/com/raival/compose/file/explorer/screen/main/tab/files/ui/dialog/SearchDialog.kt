@@ -8,7 +8,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,25 +20,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Code
-import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,20 +51,26 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope // <-- IMPORT ADDED
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -75,14 +79,12 @@ import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.block
-import com.raival.compose.file.explorer.common.copyToClipboard
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
-import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchManager
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchOptions
-import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchResult
-import com.raival.compose.file.explorer.screen.main.tab.files.ui.FileItemRow
+import kotlinx.coroutines.delay // <-- IMPORT ADDED
+import kotlinx.coroutines.launch // <-- IMPORT ADDED
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -94,9 +96,12 @@ fun SearchDialog(
     val searchManager = globalClass.searchManager
 
     if (show) {
-        val context = LocalContext.current
         val useDarkIcons = !isSystemInDarkTheme()
         var showAdvancedOptions by remember { mutableStateOf(false) }
+
+        val focusRequester = remember { FocusRequester() }
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val scope = rememberCoroutineScope() // <-- SCOPE ADDED FOR ANIMATION DELAY
 
         Dialog(
             onDismissRequest = onDismissRequest,
@@ -114,6 +119,19 @@ fun SearchDialog(
                 onDispose {}
             }
 
+            // --- AUTO-FOCUS & CURSOR-POSITION EFFECT (WITH DELAY) ---
+            LaunchedEffect(show) {
+                if (show) {
+                    delay(150) // <-- DELAY TO ALLOW DIALOG TO ANIMATE IN
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                    // Set cursor to end of text
+                    searchManager.searchQuery = searchManager.searchQuery.copy(
+                        selection = TextRange(searchManager.searchQuery.text.length)
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -127,8 +145,21 @@ fun SearchDialog(
                 // Search Header
                 SearchHeader(
                     searchManager = searchManager,
+                    focusRequester = focusRequester,
                     onBackClick = onDismissRequest,
-                    onSearchClick = { searchManager.startSearch(tab) },
+                    onSearchClick = {
+                        // --- ANIMATION-SMOOTHING LOGIC ---
+                        keyboardController?.hide()
+                        scope.launch {
+                            delay(100) // Give keyboard time to start hiding
+                            searchManager.startSearch(tab) { shouldExpand ->
+                                if (shouldExpand) {
+                                    searchManager.onExpand()
+                                }
+                                onDismissRequest()
+                            }
+                        }
+                    },
                     onAdvancedToggle = { showAdvancedOptions = !showAdvancedOptions }
                 )
 
@@ -153,17 +184,38 @@ fun SearchDialog(
                     SearchProgressPanel(searchManager = searchManager)
                 }
 
-                // Results Section
-                SearchResultsSection(
-                    searchManager = searchManager,
-                    tab = tab,
-                    context = context,
-                    onExpandClick = {
-                        searchManager.onExpand()
-                        onDismissRequest()
-                    },
-                    onDismissRequest = onDismissRequest
-                )
+                // --- NEW SEARCH HISTORY UI ---
+                AnimatedVisibility(
+                    visible = !searchManager.isSearching,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    SearchHistoryList(
+                        searchManager = searchManager,
+                        onHistoryClick = { query ->
+                            // Set query and execute search
+                            searchManager.searchQuery = TextFieldValue(
+                                text = query,
+                                selection = TextRange(query.length)
+                            )
+                            // --- ANIMATION-SMOOTHING LOGIC ---
+                            keyboardController?.hide()
+                            scope.launch {
+                                delay(100) // Give keyboard time
+                                searchManager.startSearch(tab) { shouldExpand ->
+                                    if (shouldExpand) {
+                                        searchManager.onExpand()
+                                    }
+                                    onDismissRequest()
+                                }
+                            }
+                        },
+                        onRemoveClick = { query ->
+                            searchManager.removeFromHistory(query)
+                        }
+                    )
+                }
+
+                // --- OLD `SearchResultsSection` IS COMPLETELY REMOVED ---
             }
         }
     }
@@ -172,6 +224,7 @@ fun SearchDialog(
 @Composable
 private fun SearchHeader(
     searchManager: SearchManager,
+    focusRequester: FocusRequester,
     onBackClick: () -> Unit,
     onSearchClick: () -> Unit,
     onAdvancedToggle: () -> Unit
@@ -190,7 +243,8 @@ private fun SearchHeader(
         ) {
             TextField(
                 modifier = Modifier
-                    .weight(1f),
+                    .weight(1f)
+                    .focusRequester(focusRequester),
                 value = searchManager.searchQuery,
                 onValueChange = { searchManager.searchQuery = it },
                 colors = TextFieldDefaults.colors(
@@ -479,176 +533,71 @@ private fun SearchProgressPanel(searchManager: SearchManager) {
     }
 }
 
+// --- NEW COMPOSABLE FOR SEARCH HISTORY ---
 @Composable
-private fun SearchResultsSection(
+fun SearchHistoryList(
     searchManager: SearchManager,
-    tab: FilesTab,
-    context: android.content.Context,
-    onExpandClick: () -> Unit,
-    onDismissRequest: () -> Unit
+    onHistoryClick: (String) -> Unit,
+    onRemoveClick: (String) -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        // Results Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(color = MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(bottom = if (searchManager.searchResults.isEmpty()) 12.dp else 8.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = stringResource(R.string.search_results, searchManager.searchResults.size),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            if (searchManager.searchResults.isNotEmpty()) {
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    onClick = { searchManager.clearResults() }
-                ) {
-                    Text(stringResource(R.string.clear))
-                }
-                if (!searchManager.isSearching) {
-                    Space(8.dp)
-                    TextButton(onClick = onExpandClick) {
-                        Text(stringResource(R.string.expand))
-                    }
-                }
-            }
-        }
+    // Read the history from preferences
+    val history = globalClass.preferencesManager.searchHistory.toList().reversed()
 
-        // Results List
+    if (history.isEmpty()) {
+        // You can add a placeholder here if you want
+        // e.g., Text("No recent searches", modifier = Modifier.padding(16.dp))
+        return
+    }
+
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Text(
+            text = "Recent Searches",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(16.dp)
+        )
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            itemsIndexed(
-                searchManager.searchResults,
-                key = { index, item -> "${item.file.uniquePath}_${item.matchType}_$index" }
-            ) { index, searchResult ->
-                SearchResultItem(
-                    searchResult = searchResult,
-                    onItemClick = {
-                        if (searchResult.file.isFile()) {
-                            tab.openFile(context, searchResult.file)
-                        } else {
-                            tab.openFolder(searchResult.file, rememberListState = false)
-                        }
-                    },
-                    onLocateClick = {
-                        onDismissRequest()
-                        globalClass.mainActivityManager.replaceCurrentTabWith(
-                            tab = FilesTab(source = searchResult.file)
-                        )
-                    },
-                    onCopyPathClick = {
-                        searchResult.file.uniquePath.copyToClipboard()
-                        globalClass.showMsg(globalClass.getString(R.string.copied_to_clipboard))
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SearchResultItem(
-    searchResult: SearchResult,
-    onItemClick: () -> Unit,
-    onLocateClick: () -> Unit,
-    onCopyPathClick: () -> Unit
-) {
-    var showMoreOptionsMenu by remember { mutableStateOf(false) }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onItemClick,
-                onLongClick = { showMoreOptionsMenu = true }
-            ),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 1.dp
-    ) {
-        Column(
-            modifier = Modifier.padding(6.dp)
-        ) {
-            // File item row
-            FileItemRow(
-                item = searchResult.file,
-                fileDetails = if (searchResult.file is LocalFileHolder)
-                    searchResult.file.basePath else searchResult.file.uniquePath,
-            )
-
-            // Content preview for content matches
-            if (searchResult.matchType == SearchResult.MatchType.CONTENT &&
-                !searchResult.matchedLine.isNullOrEmpty()
-            ) {
+            items(history, key = { it }) { query ->
                 Row(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onHistoryClick(query) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(R.string.line, searchResult.lineNumber!!),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(8.dp)
+                    Icon(
+                        imageVector = Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(color = MaterialTheme.colorScheme.surfaceContainer),
+                    Space(size = 16.dp)
+                    Text(
+                        text = query,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Space(size = 8.dp)
+                    IconButton(
+                        onClick = { onRemoveClick(query) },
+                        modifier = Modifier.size(24.dp)
                     ) {
-                        Text(
-                            text = searchResult.matchedLine,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(8.dp),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                        Icon(
+                            imageVector = Icons.Rounded.Clear,
+                            contentDescription = "Remove",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainer)
             }
-        }
-
-        // Context menu
-        DropdownMenu(
-            expanded = showMoreOptionsMenu,
-            onDismissRequest = { showMoreOptionsMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.locate)) },
-                onClick = {
-                    showMoreOptionsMenu = false
-                    onLocateClick()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.MyLocation,
-                        contentDescription = null
-                    )
-                }
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.copy_path)) },
-                onClick = {
-                    showMoreOptionsMenu = false
-                    onCopyPathClick()
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.ContentCopy,
-                        contentDescription = null
-                    )
-                }
-            )
         }
     }
 }

@@ -6,5 +6,5 @@ data class SearchOptions(
     val searchByExtension: Boolean = false,
     val searchInFileContent: Boolean = false,
     val maxFileSize: Long = 50 * 1024 * 1024,
-    val maxResults: Int = 1000
+    val maxResults: Int = 10000 // <-- CHANGED FROM 1000
 )

@@ -5,7 +5,7 @@ package com.raival.compose.file.explorer.viewer
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.ContentUris
-import android.content.ContentValues // Corrected import
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -21,7 +21,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -36,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -53,10 +53,10 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.C // Import C for scaling mode
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.VideoSize // Import VideoSize
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
@@ -72,14 +72,18 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
 
-// *** MOVED ALL HELPER FUNCTIONS HERE TO FIX UNRESOLVED REFERENCES ***
+// *** HELPER FUNCTIONS ***
 
 private fun isImage(extension: String): Boolean {
-    return extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg")
+    return extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif")
 }
 
 private fun isVideo(extension: String): Boolean {
-    return extension in listOf("mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "3gp", "m4v")
+    return extension in listOf("mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "3gp", "m4v", "mpeg", "mpg")
+}
+
+private fun isAudio(extension: String): Boolean {
+    return extension in listOf("mp3", "wav", "aac", "flac", "ogg", "m4a", "wma", "amr", "opus", "mid", "midi")
 }
 
 private suspend fun checkBookmarkStatus(filePath: String, onResult: (Boolean) -> Unit) {
@@ -130,10 +134,12 @@ private suspend fun shareFile(context: android.content.Context, filePath: String
                 "${context.packageName}.provider",
                 file
             )
+            val extension = file.extension.lowercase()
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = when (file.extension.lowercase()) {
-                    in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp") -> "image/*"
-                    in listOf("mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "3gp", "m4v") -> "video/*"
+                type = when {
+                    isImage(extension) -> "image/*"
+                    isVideo(extension) -> "video/*"
+                    isAudio(extension) -> "audio/*"
                     else -> "*/*"
                 }
                 putExtra(Intent.EXTRA_STREAM, uri)
@@ -198,6 +204,7 @@ private suspend fun moveToTrash(
 
 private fun getMediaUri(contentResolver: ContentResolver, file: File): Uri? {
     val extension = file.extension.lowercase()
+    // Determine which collection to query based on file type
     val collection = when {
         isImage(extension) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -213,6 +220,13 @@ private fun getMediaUri(contentResolver: ContentResolver, file: File): Uri? {
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI
             }
         }
+        isAudio(extension) -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            } else {
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            }
+        }
         else -> return null
     }
 
@@ -220,11 +234,15 @@ private fun getMediaUri(contentResolver: ContentResolver, file: File): Uri? {
     val selection = "${MediaStore.MediaColumns.DATA}=?"
     val selectionArgs = arrayOf(file.absolutePath)
 
-    contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-        if (cursor.moveToFirst()) {
-            val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-            return ContentUris.withAppendedId(collection, id)
+    try {
+        contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                return ContentUris.withAppendedId(collection, id)
+            }
         }
+    } catch (e: Exception) {
+        return null
     }
     return null
 }
@@ -255,7 +273,6 @@ private fun formatDuration(millis: Long): String {
 }
 
 // *** END OF HELPER FUNCTIONS ***
-
 
 @OptIn(ExperimentalFoundationApi::class)
 class MediaViewerActivity : ComponentActivity() {
@@ -385,7 +402,6 @@ fun MediaViewerScreen(
                 val fileItem = currentMediaList[page]
                 val file = File(fileItem.path)
 
-                // MediaContent will now be pre-composed by the Pager.
                 MediaContent(
                     file = file,
                     pagerState = pagerState,
@@ -600,7 +616,11 @@ private fun TopOverlay(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.4f))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent)
+                )
+            )
             .statusBarsPadding()
             .padding(horizontal = 4.dp, vertical = 8.dp)
     ) {
@@ -732,6 +752,15 @@ private fun MediaContent(
                     pagerState = pagerState,
                     pageIndex = pageIndex,
                     showUI = showUI,
+                    onToggleUI = onToggleUI,
+                    onError = onError
+                )
+            }
+            isAudio(extension) -> {
+                AudioPlayer(
+                    file = file,
+                    pagerState = pagerState,
+                    pageIndex = pageIndex,
                     onToggleUI = onToggleUI,
                     onError = onError
                 )
@@ -977,16 +1006,12 @@ private fun VideoPlayer(
         var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
         var isPlayerRendered by remember { mutableStateOf(false) }
 
-        // *** FLICKER FIX: Separate user intent from actual player state ***
-        // This state tracks the *actual* playing state from the listener
         var isActuallyPlaying by remember { mutableStateOf(exoPlayer.playWhenReady) }
-        // This state tracks what the *user* wants, (it won't flicker during seek)
         var userPlayIntent by remember { mutableStateOf(false) }
 
         DisposableEffect(exoPlayer) {
             val listener = object : Player.Listener {
                 override fun onIsPlayingChanged(isPlayingChange: Boolean) {
-                    // Update the "actual" state from the listener
                     isActuallyPlaying = isPlayingChange
                 }
 
@@ -1005,8 +1030,6 @@ private fun VideoPlayer(
 
                 override fun onVideoSizeChanged(size: VideoSize) {
                     super.onVideoSizeChanged(size)
-                    // *** LOOP FLICKER FIX: Only accept a *known*, valid size ***
-                    // This prevents the state from resetting to UNKNOWN during a loop.
                     if (size != VideoSize.UNKNOWN) {
                         videoSize = size
                     }
@@ -1023,7 +1046,6 @@ private fun VideoPlayer(
             }
         }
 
-        // This effect drives the seek bar time, uses the "actual" state
         LaunchedEffect(isActuallyPlaying, isSeeking) {
             while (isActuallyPlaying && !isSeeking) {
                 currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
@@ -1031,21 +1053,19 @@ private fun VideoPlayer(
             }
         }
 
-        // This effect controls play/pause based on swiping
         LaunchedEffect(pagerState.settledPage, pageIndex) {
             val isSettledPage = pagerState.settledPage == pageIndex
             exoPlayer.playWhenReady = isSettledPage
-            userPlayIntent = isSettledPage // Sync user intent with swipe
+            userPlayIntent = isSettledPage
             if (isSettledPage && exoPlayer.playbackState == Player.STATE_READY) {
                 exoPlayer.seekTo(0)
             }
         }
 
-        // This handles the case for the very first video on launch
         LaunchedEffect(Unit) {
             if (pagerState.currentPage == pageIndex) {
                 exoPlayer.playWhenReady = true
-                userPlayIntent = true // Sync user intent on launch
+                userPlayIntent = true
             }
         }
 
@@ -1060,7 +1080,6 @@ private fun VideoPlayer(
             }
         }
 
-        // This logic creates the seamless fade-in over the thumbnail
         val isVideoReady = isPlayerRendered && videoSize != VideoSize.UNKNOWN
         val playerAlpha by animateFloatAsState(
             targetValue = if (isVideoReady) 1f else 0f,
@@ -1071,66 +1090,55 @@ private fun VideoPlayer(
             animationSpec = tween(durationMillis = 150)
         )
 
-        // This logic creates the correct aspect ratio *before* displaying
         val playerModifier = if (videoSize != VideoSize.UNKNOWN) {
             Modifier.aspectRatio(videoSize.width / videoSize.height.toFloat().coerceAtLeast(0.001f))
         } else {
-            Modifier // Start with no size (it will be invisible, 0x0)
+            Modifier
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    // This logic (20% sides, 60% middle) is correct per your request
                     val tapZonePercent = 0.20f
                     detectTapGestures(
-                        onTap = { _ ->
-                            // Single tap anywhere toggles UI
-                            onToggleUI()
-                        },
+                        onTap = { onToggleUI() },
                         onDoubleTap = { tapOffset ->
                             val screenWidth = size.width
                             when {
-                                // Left 20%
                                 tapOffset.x < screenWidth * tapZonePercent -> {
                                     val newPos = (exoPlayer.currentPosition - 5000).coerceAtLeast(0L)
                                     exoPlayer.seekTo(newPos)
                                     currentPosition = newPos
                                 }
-                                // Right 20%
                                 tapOffset.x > screenWidth * (1f - tapZonePercent) -> {
                                     val newPos = (exoPlayer.currentPosition + 5000).coerceAtMost(totalDuration)
                                     exoPlayer.seekTo(newPos)
                                     currentPosition = newPos
                                 }
-                                // Middle 60% -> Do nothing
-                                else -> {}
                             }
                         }
                     )
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Layer 1 - The Thumbnail (Fades out)
             AsyncImage(
                 model = uri,
                 contentDescription = "Video Thumbnail",
                 modifier = Modifier
                     .fillMaxSize()
                     .alpha(thumbAlpha),
-                contentScale = ContentScale.Fit, // Always correctly scaled
+                contentScale = ContentScale.Fit,
                 onError = { onError("Failed to load video thumbnail") }
             )
 
-            // Layer 2 - The Player (Fades in, correctly-sized)
             AndroidView(
                 factory = { context ->
                     SurfaceView(context).apply {
                         exoPlayer.setVideoSurfaceView(this)
                     }
                 },
-                modifier = playerModifier.alpha(playerAlpha) // Applies aspect ratio and fade
+                modifier = playerModifier.alpha(playerAlpha)
             )
 
             val fadeSpec = tween<Float>(durationMillis = 250, easing = LinearEasing)
@@ -1140,8 +1148,7 @@ private fun VideoPlayer(
                 exit = fadeOut(animationSpec = fadeSpec),
                 modifier = Modifier.fillMaxSize()
             ) {
-                MinimalVideoControls(
-                    // *** FLICKER FIX: Pass the user's intent to the icon ***
+                UnifiedMediaControls(
                     isPlaying = userPlayIntent,
                     isMuted = isMuted,
                     currentPosition = currentPosition,
@@ -1149,7 +1156,6 @@ private fun VideoPlayer(
                     isSeeking = isSeeking,
                     seekPosition = seekPosition,
                     onPlayPauseToggle = {
-                        // *** FLICKER FIX: Toggle the user's intent ***
                         userPlayIntent = !userPlayIntent
                         exoPlayer.playWhenReady = userPlayIntent
                     },
@@ -1161,7 +1167,7 @@ private fun VideoPlayer(
                             exoPlayer.volume = 0f
                         }
                     },
-                    onSeekChange = { newPos -> // newPos is a Float
+                    onSeekChange = { newPos ->
                         isSeeking = true
                         seekPosition = newPos
                     },
@@ -1179,10 +1185,177 @@ private fun VideoPlayer(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MinimalVideoControls(
+private fun AudioPlayer(
+    file: File,
+    pagerState: PagerState,
+    pageIndex: Int,
+    onToggleUI: () -> Unit,
+    onError: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val uri = Uri.fromFile(file)
+
+    // Reuse ExoPlayer for audio, but without SurfaceView
+    val exoPlayer = remember {
+        try {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(uri))
+                repeatMode = Player.REPEAT_MODE_OFF // Usually off for standard audio play, can be changed
+                prepare()
+                playWhenReady = false
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    if (exoPlayer != null) {
+        var currentPosition by remember { mutableStateOf(0L) }
+        var totalDuration by remember { mutableStateOf(0L) }
+        var isSeeking by remember { mutableStateOf(false) }
+        var seekPosition by remember { mutableStateOf(0f) }
+        var isMuted by remember { mutableStateOf(exoPlayer.volume == 0f) }
+        var currentVolume by remember { mutableStateOf(1f) }
+
+        var isActuallyPlaying by remember { mutableStateOf(exoPlayer.playWhenReady) }
+        var userPlayIntent by remember { mutableStateOf(false) }
+
+        DisposableEffect(exoPlayer) {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(isPlayingChange: Boolean) {
+                    isActuallyPlaying = isPlayingChange
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY) {
+                        totalDuration = exoPlayer.duration.coerceAtLeast(0L)
+                    }
+                }
+
+                override fun onVolumeChanged(volume: Float) {
+                    isMuted = volume == 0f
+                    if (volume > 0f) {
+                        currentVolume = volume
+                    }
+                }
+            }
+            exoPlayer.addListener(listener)
+            onDispose {
+                exoPlayer.removeListener(listener)
+            }
+        }
+
+        LaunchedEffect(isActuallyPlaying, isSeeking) {
+            while (isActuallyPlaying && !isSeeking) {
+                currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
+                delay(100)
+            }
+        }
+
+        // Sync play state with pager swipe
+        LaunchedEffect(pagerState.settledPage, pageIndex) {
+            val isSettledPage = pagerState.settledPage == pageIndex
+            exoPlayer.playWhenReady = isSettledPage
+            userPlayIntent = isSettledPage
+            if (isSettledPage && exoPlayer.playbackState == Player.STATE_READY) {
+                // Optional: Auto-restart if returning to page
+                // exoPlayer.seekTo(0)
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            if (pagerState.currentPage == pageIndex) {
+                exoPlayer.playWhenReady = true
+                userPlayIntent = true
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                exoPlayer.stop()
+                exoPlayer.release()
+            }
+        }
+
+        // AUDIO UI LAYOUT
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onToggleUI() })
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Center Icon for Audio
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.offset(y = (-48).dp) // Shift up slightly to make room for controls
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MusicNote,
+                    contentDescription = "Audio File",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .size(120.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), CircleShape)
+                        .padding(24.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.9f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+
+            // Controls are always visible for Audio (or use showUI if you prefer them to hide)
+            UnifiedMediaControls(
+                isPlaying = userPlayIntent,
+                isMuted = isMuted,
+                currentPosition = currentPosition,
+                totalDuration = totalDuration,
+                isSeeking = isSeeking,
+                seekPosition = seekPosition,
+                onPlayPauseToggle = {
+                    userPlayIntent = !userPlayIntent
+                    exoPlayer.playWhenReady = userPlayIntent
+                },
+                onMuteToggle = {
+                    if (isMuted) {
+                        exoPlayer.volume = currentVolume
+                    } else {
+                        currentVolume = exoPlayer.volume
+                        exoPlayer.volume = 0f
+                    }
+                },
+                onSeekChange = { newPos ->
+                    isSeeking = true
+                    seekPosition = newPos
+                },
+                onSeekFinished = {
+                    isSeeking = false
+                    exoPlayer.seekTo(seekPosition.toLong())
+                    currentPosition = seekPosition.toLong()
+                },
+                modifier = Modifier.fillMaxSize(),
+                alwaysVisibleGradient = true // Makes controls readable over any background
+            )
+        }
+    } else {
+        onError("Failed to initialize audio player")
+    }
+}
+
+// REFACTORED: Shared controls for both Video and Audio
+@Composable
+private fun UnifiedMediaControls(
     modifier: Modifier = Modifier,
-    isPlaying: Boolean, // This is now the "userPlayIntent"
+    isPlaying: Boolean,
     isMuted: Boolean,
     currentPosition: Long,
     totalDuration: Long,
@@ -1191,13 +1364,15 @@ private fun MinimalVideoControls(
     onPlayPauseToggle: () -> Unit,
     onMuteToggle: () -> Unit,
     onSeekChange: (Float) -> Unit,
-    onSeekFinished: () -> Unit
+    onSeekFinished: () -> Unit,
+    alwaysVisibleGradient: Boolean = false
 ) {
     var sliderContainerSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
     val durationAsFloat = remember(totalDuration) { totalDuration.toFloat().coerceAtLeast(1.0f) }
 
     Box(modifier = modifier) {
+        // Play/Pause Button in Center
         IconButton(
             onClick = onPlayPauseToggle,
             modifier = Modifier
@@ -1206,7 +1381,6 @@ private fun MinimalVideoControls(
                 .background(Color.Black.copy(alpha = 0.5f), CircleShape)
         ) {
             Icon(
-                // This icon is now stable during seeks
                 imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
                 tint = Color.White,
@@ -1214,109 +1388,124 @@ private fun MinimalVideoControls(
             )
         }
 
-        Row(
+        // Bottom Controls Bar
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                .then(
+                    if (alwaysVisibleGradient) {
+                        Modifier.background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                            )
+                        )
+                    } else Modifier
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp)
-                .navigationBarsPadding(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .navigationBarsPadding()
         ) {
-            Text(
-                text = formatDuration(if (isSeeking) seekPosition.toLong() else currentPosition),
-                color = Color.White,
-                fontSize = 13.sp,
-                modifier = Modifier.width(42.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = formatDuration(if (isSeeking) seekPosition.toLong() else currentPosition),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    modifier = Modifier.width(42.dp)
+                )
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(24.dp)
-                    .onSizeChanged { sliderContainerSize = it }
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            val widthPx = sliderContainerSize.width.toFloat()
-                            if (widthPx > 0) {
-                                val newPos = (offset.x / widthPx) * durationAsFloat
-                                onSeekChange(newPos.coerceIn(0f, durationAsFloat))
-                                onSeekFinished()
-                            }
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { offset ->
+                // Custom Seek Bar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(24.dp)
+                        .onSizeChanged { sliderContainerSize = it }
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
                                 val widthPx = sliderContainerSize.width.toFloat()
                                 if (widthPx > 0) {
                                     val newPos = (offset.x / widthPx) * durationAsFloat
                                     onSeekChange(newPos.coerceIn(0f, durationAsFloat))
-                                }
-                            },
-                            onDragEnd = {
-                                onSeekFinished()
-                            },
-                            onHorizontalDrag = { change, _ ->
-                                change.consume()
-                                val widthPx = sliderContainerSize.width.toFloat()
-                                if (widthPx > 0) {
-                                    val newPos = (change.position.x / widthPx) * durationAsFloat
-                                    onSeekChange(newPos.coerceIn(0f, durationAsFloat))
+                                    onSeekFinished()
                                 }
                             }
-                        )
-                    },
-                contentAlignment = Alignment.CenterStart
-            ) {
-                // Inactive track
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(Color.White.copy(alpha = 0.3f))
-                )
+                        }
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { offset ->
+                                    val widthPx = sliderContainerSize.width.toFloat()
+                                    if (widthPx > 0) {
+                                        val newPos = (offset.x / widthPx) * durationAsFloat
+                                        onSeekChange(newPos.coerceIn(0f, durationAsFloat))
+                                    }
+                                },
+                                onDragEnd = {
+                                    onSeekFinished()
+                                },
+                                onHorizontalDrag = { change, _ ->
+                                    change.consume()
+                                    val widthPx = sliderContainerSize.width.toFloat()
+                                    if (widthPx > 0) {
+                                        val newPos = (change.position.x / widthPx) * durationAsFloat
+                                        onSeekChange(newPos.coerceIn(0f, durationAsFloat))
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    // Inactive track
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(Color.White.copy(alpha = 0.3f))
+                    )
 
-                val progress = (if (isSeeking) seekPosition else currentPosition.toFloat()) / durationAsFloat
+                    val progress =
+                        (if (isSeeking) seekPosition else currentPosition.toFloat()) / durationAsFloat
 
-                // Active track
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(Color.White)
-                )
+                    // Active track
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(Color.White)
+                    )
 
-                // Thumb
-                val thumbOffsetDp = with(density) {
-                    (sliderContainerSize.width * progress.coerceIn(0f, 1f)).toDp() - 6.dp
+                    // Thumb
+                    val thumbOffsetDp = with(density) {
+                        (sliderContainerSize.width * progress.coerceIn(0f, 1f)).toDp() - 6.dp
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .offset(x = thumbOffsetDp.coerceAtLeast(0.dp))
+                            .size(12.dp)
+                            .background(Color.White, CircleShape)
+                    )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .offset(x = thumbOffsetDp.coerceAtLeast(0.dp))
-                        .size(12.dp)
-                        .background(Color.White, CircleShape)
+                Text(
+                    text = formatDuration(totalDuration),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    modifier = Modifier.width(42.dp)
                 )
-            }
 
-            Text(
-                text = formatDuration(totalDuration),
-                color = Color.White,
-                fontSize = 13.sp,
-                modifier = Modifier.width(42.dp)
-            )
-
-            IconButton(
-                onClick = onMuteToggle,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = if (isMuted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                    contentDescription = if (isMuted) "Unmute" else "Mute",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+                IconButton(
+                    onClick = onMuteToggle,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.raival.compose.file.explorer.screen.main
 
 import android.content.Context
+import androidx.compose.ui.text.input.TextFieldValue
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.raival.compose.file.explorer.App.Companion.globalClass
@@ -21,6 +22,8 @@ import com.raival.compose.file.explorer.screen.main.tab.Tab
 import com.raival.compose.file.explorer.screen.main.tab.apps.AppsTab
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.SEARCH
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 import kotlinx.coroutines.CoroutineScope
@@ -45,9 +48,6 @@ class MainActivityManager {
 
     var newUpdate: GithubRelease? = null
 
-    /**\
-     * Loads available storage devices (Internal Storage, SD cards, etc)
-     */
     fun setup() {
         managerScope.launch {
             _state.update {
@@ -58,25 +58,27 @@ class MainActivityManager {
         }
     }
 
-    /**
-     * Removes all tabs except the one at the given index.
-     *
-     * If the tab at the given index is not already selected, it will be selected first.
-     * Then, all other tabs will be removed.
-     *
-     * @param tabIndex The index of the tab to keep.
-     */
     fun removeOtherTabs(tabIndex: Int) {
-        // For now, you can only remove tabs other than the selected tab
         if (tabIndex isNot _state.value.selectedTabIndex) return
 
         val tabToKeep = _state.value.tabs[tabIndex]
         val tabsToRemove = _state.value.tabs.filter { it != tabToKeep }
 
-        // Call onTabRemoved on tabs being removed BEFORE state update
         tabsToRemove.forEach { it.onTabRemoved() }
 
-        // Update the state
+        var isSearchTab = false
+        if (tabToKeep is FilesTab) {
+            if (tabToKeep.activeFolder is VirtualFileHolder) {
+                if ((tabToKeep.activeFolder as VirtualFileHolder).type == SEARCH) {
+                    isSearchTab = true
+                }
+            }
+        }
+
+        if (!isSearchTab) {
+            globalClass.searchManager.clearAllState()
+        }
+
         _state.update {
             it.copy(
                 tabs = listOf(tabToKeep),
@@ -86,29 +88,36 @@ class MainActivityManager {
     }
 
     fun removeTabAt(index: Int) {
-        // There must be at least one tab
         if (_state.value.tabs.size <= 1) return
 
         val tabToRemove = _state.value.tabs[index]
         val currentSelectedIndex = _state.value.selectedTabIndex
 
-        // Call callbacks on the tab to be removed BEFORE state update
+        var isSearchTab = false
+        if (tabToRemove is FilesTab) {
+            if (tabToRemove.activeFolder is VirtualFileHolder) {
+                if ((tabToRemove.activeFolder as VirtualFileHolder).type == SEARCH) {
+                    isSearchTab = true
+                }
+            }
+        }
+        if (isSearchTab) {
+            globalClass.searchManager.clearAllState()
+        }
+
         if (currentSelectedIndex == index) {
             tabToRemove.onTabStopped()
         }
         tabToRemove.onTabRemoved()
 
-        // Calculate new selected tab index
         val newSelectedTabIndex = if (index < currentSelectedIndex) {
             currentSelectedIndex - 1
         } else if (index > currentSelectedIndex) {
             currentSelectedIndex
         } else {
-            // Removing the selected tab itself - choose the previous tab if available, otherwise the next one
             max(0, index - 1)
         }
 
-        // Update the state
         _state.update {
             it.copy(
                 tabs = _state.value.tabs.filterIndexed { i, _ ->
@@ -118,7 +127,6 @@ class MainActivityManager {
             )
         }
 
-        // Call callbacks on the new selected tab AFTER state update (if it's different from before)
         if (index == currentSelectedIndex) {
             val newSelectedTab = _state.value.tabs[newSelectedTabIndex]
             if (newSelectedTab.isCreated) {
@@ -132,17 +140,14 @@ class MainActivityManager {
     fun addTabAndSelect(tab: Tab, index: Int = -1) {
         val currentActiveTab = getActiveTab()
 
-        // Stop the active tab BEFORE state update
         currentActiveTab?.onTabStopped()
 
-        // Validate the index
         val validatedIndex = if (index isNot -1) {
             max(0, min(index, _state.value.tabs.lastIndex + 1))
         } else {
             _state.value.tabs.lastIndex + 1
         }
 
-        // Update the state
         _state.update {
             it.copy(
                 tabs = _state.value.tabs + tab,
@@ -150,7 +155,6 @@ class MainActivityManager {
             )
         }
 
-        // Start the new tab AFTER state update
         if (tab.isCreated) {
             tab.onTabResumed()
         } else {
@@ -159,7 +163,6 @@ class MainActivityManager {
     }
 
     fun selectTabAt(index: Int, skipTabRefresh: Boolean = false) {
-        // Validate the index
         val validatedIndex = if (index isNot -1) {
             max(0, min(index, _state.value.tabs.lastIndex))
         } else {
@@ -169,21 +172,17 @@ class MainActivityManager {
         val currentSelectedIndex = _state.value.selectedTabIndex
         val currentActiveTab = getActiveTab()
 
-        // If the tab is already selected, resume that tab (kind of refreshing the tab)
         if (validatedIndex == currentSelectedIndex) {
             if (!skipTabRefresh) {
                 currentActiveTab?.onTabResumed()
             }
         } else {
-            // Stop the active tab BEFORE state update
             currentActiveTab?.onTabStopped()
 
-            // Update the state
             _state.update {
                 it.copy(selectedTabIndex = validatedIndex)
             }
 
-            // Start the new tab AFTER state update
             val newSelectedTab = _state.value.tabs[validatedIndex]
             if (newSelectedTab.isCreated) {
                 newSelectedTab.onTabResumed()
@@ -193,10 +192,39 @@ class MainActivityManager {
         }
     }
 
+    // --- FIXED VERSION USING VERSION 1 LOGIC ---
     fun replaceCurrentTabWith(tab: Tab, keepCurrentTabAsParent: Boolean = false) {
         val currentActiveTab = getActiveTab()
+        val currentTabIndex = _state.value.selectedTabIndex
 
-        // Stop and remove the active tab BEFORE state update
+        // --- VERSION 1 GHOST TAB FIX: Handle replace (Home button) ---
+        if (currentActiveTab is FilesTab && tab is HomeTab) {
+            var isCurrentTabSearch = false
+            if (currentActiveTab.activeFolder is VirtualFileHolder) {
+                if ((currentActiveTab.activeFolder as VirtualFileHolder).type == SEARCH) {
+                    isCurrentTabSearch = true
+                }
+            }
+
+            if (isCurrentTabSearch) {
+                // Clear search memory
+                globalClass.searchManager.clearAllState()
+
+                // Find and remove ghost tab
+                val ghostTabIndex = currentTabIndex - 1
+                if (ghostTabIndex >= 0) {
+                    val ghostTab = _state.value.tabs[ghostTabIndex]
+                    if (ghostTab is FilesTab && ghostTab.isTemporaryForSearch) {
+                        // Remove ghost tab first
+                        removeTabAt(ghostTabIndex)
+                        // After removal, indices shift, so we don't need further adjustment
+                        return
+                    }
+                }
+            }
+        }
+        // --- END VERSION 1 LOGIC ---
+
         currentActiveTab?.apply {
             onTabStopped()
             if (!keepCurrentTabAsParent) onTabRemoved()
@@ -206,7 +234,6 @@ class MainActivityManager {
             tab.parentTab = currentActiveTab
         }
 
-        // Update the state
         _state.update {
             it.copy(
                 tabs = _state.value.tabs.mapIndexed { index, oldTab ->
@@ -215,7 +242,6 @@ class MainActivityManager {
             )
         }
 
-        // Start the new tab AFTER state update
         if (tab.isCreated) {
             tab.onTabResumed()
         } else {
@@ -253,22 +279,6 @@ class MainActivityManager {
         }
     }
 
-    /**
-     * Checks if the app can exit.
-     *
-     * This function checks the following conditions in order:
-     * 1. If the active tab handles the back press, the app cannot exit.
-     * 2. If the active tab is not the home tab and the "skip home when tab closed" setting is disabled,
-     *    the active tab is replaced with the home tab and the app cannot exit.
-     * 3. If there is more than one tab and the selected tab is not the first tab,
-     *    the active tab is removed and the app cannot exit.
-     * 4. If there is only one tab and there are unsaved files in the text editor,
-     *    a dialog is shown to save the files and the app cannot exit.
-     *
-     * If none of the above conditions are met, the app can exit.
-     *
-     * @return True if the app can exit, false otherwise.
-     */
     fun canExit(): Boolean {
         val tabs = _state.value.tabs
         val selectedTabIndex = _state.value.selectedTabIndex
@@ -277,30 +287,25 @@ class MainActivityManager {
             return true
         }
 
-        // Handle tabs's onBackPress
         if (getActiveTab()!!.onBackPressed()) {
             return false
         }
 
-        // Replace with parent tab if exists
         if (getActiveTab()!!.parentTab != null) {
             replaceCurrentTabWith(getActiveTab()!!.parentTab!!, false)
             return false
         }
 
-        // Replace the active tab with the home tab (if turned on in settings)
         if (getActiveTab() !is HomeTab && !globalClass.preferencesManager.skipHomeWhenTabClosed) {
             replaceCurrentTabWith(HomeTab())
             return false
         }
 
-        // Remove the active tab
         if (tabs.size > 1 && selectedTabIndex isNot 0 && globalClass.preferencesManager.closeTabOnBackPress) {
             removeTabAt(selectedTabIndex)
             return false
         }
 
-        // Check TextEditor files
         if (tabs.size == 1 && !allTextEditorFileInstancesSaved()) {
             _state.update {
                 it.copy(
@@ -405,7 +410,6 @@ class MainActivityManager {
                 tabs.add(newTab)
             }
 
-            // Update the state first
             _state.update {
                 it.copy(
                     tabs = tabs,
@@ -413,10 +417,8 @@ class MainActivityManager {
                 )
             }
 
-            // Call callbacks on tabs AFTER state update
             tabs.forEachIndexed { tabIndex, tab ->
                 if (tabIndex == index) {
-                    // This is the selected tab
                     if (tab.isCreated) {
                         tab.onTabResumed()
                     } else {
@@ -452,28 +454,25 @@ class MainActivityManager {
     }
 
     private fun isNewerVersion(latestVersion: List<Int>, currentVersion: List<Int>): Boolean {
-        // Determine the length of the longest version array to pad the shorter one.
         val componentCount = max(latestVersion.size, currentVersion.size)
-
-        // Pad both lists to the same size with zeros. This handles cases like "2.0" vs "2.0.1".
         val latestPadded = latestVersion.padEnd(componentCount, 0)
         val currentPadded = currentVersion.padEnd(componentCount, 0)
 
         for (i in 0 until componentCount) {
             if (latestPadded[i] > currentPadded[i]) {
-                return true // latest is newer (e.g., 1.10.0 vs 1.9.0)
+                return true
             }
             if (latestPadded[i] < currentPadded[i]) {
-                return false // current is newer or same, so latest is not an update
+                return false
             }
         }
-        return false // Versions are identical
+        return false
     }
 
     private fun parseVersion(versionName: String): List<Int> {
         return versionName.removePrefix("v")
             .split(".")
-            .map { it.toIntOrNull() ?: 0 } // Use toIntOrNull for safety
+            .map { it.toIntOrNull() ?: 0 }
     }
 
     fun fetchGithubReleases(
@@ -512,6 +511,37 @@ class MainActivityManager {
             }
 
             onResult(releases)
+        }
+    }
+
+    fun onSearchClicked() {
+        val activeTab = getActiveTab()
+
+        if (activeTab is FilesTab) {
+            activeTab.isTemporaryForSearch = false
+            activeTab.toggleSearchPenal(true)
+        } else {
+            val internalStorage = StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder
+            val newFilesTab = FilesTab(internalStorage)
+
+            newFilesTab.isTemporaryForSearch = true
+
+            addTabAndSelect(newFilesTab)
+            newFilesTab.toggleSearchPenal(true)
+        }
+    }
+
+    fun closeCurrentTabAndRevertToHome() {
+        val currentTabIndex = _state.value.selectedTabIndex
+
+        if (currentTabIndex != 0) {
+            removeTabAt(currentTabIndex)
+
+            if (_state.value.tabs.size > 0 && _state.value.selectedTabIndex != 0) {
+                selectTabAt(0)
+            }
+
+            globalClass.searchManager.clearAllState()
         }
     }
 

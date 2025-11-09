@@ -2,15 +2,19 @@ package com.raival.compose.file.explorer.screen.main.tab.files.ui
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,7 +38,9 @@ import com.raival.compose.file.explorer.common.extension.putParcelableArrayListE
 import com.raival.compose.file.explorer.common.ui.Isolate
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListFontSize
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListIconSize
@@ -43,6 +49,7 @@ import com.raival.compose.file.explorer.viewer.MediaViewerActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -59,7 +66,9 @@ fun FileItemRow(
     viewConfigs: ViewConfigs = ViewConfigs(),
     mediaFiles: List<FileItem> = emptyList(),
     initialPosition: Int = 0,
-    isBookmarked: Boolean = false
+    isBookmarked: Boolean = false,
+    isFavorited: Boolean = false,
+    currentFolder: ContentHolder? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -99,20 +108,11 @@ fun FileItemRow(
                 size = iconSize.dp,
                 viewConfigs = viewConfigs,
                 onClick = { onItemClick?.invoke() },
-                onLongClick = { onLongClick?.invoke() }
+                onLongClick = { onLongClick?.invoke() },
+                isBookmarked = isBookmarked,
+                isFavorited = isFavorited,
+                currentFolder = currentFolder
             )
-
-            // Bookmark indicator
-            if (isBookmarked) {
-                Icon(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .align(Alignment.TopEnd),
-                    imageVector = Icons.Rounded.Bookmark,
-                    tint = MaterialTheme.colorScheme.primary,
-                    contentDescription = "Bookmarked"
-                )
-            }
         }
 
         Spacer(modifier = Modifier.width(space.dp))
@@ -188,8 +188,31 @@ fun FileIcon(
     size: androidx.compose.ui.unit.Dp,
     viewConfigs: ViewConfigs,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {}
+    onLongClick: () -> Unit = {},
+    isBookmarked: Boolean = false,
+    isFavorited: Boolean = false,
+    currentFolder: ContentHolder? = null
 ) {
+    val isVideo = isVideoFile(item.getFileExtension())
+    var videoDuration by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(item.uid) {
+        if (isVideo) {
+            videoDuration = getVideoDuration(item.uniquePath)
+        }
+    }
+
+    // Determine which icons to show based on current folder
+    val showBookmarkIcon = when {
+        currentFolder is VirtualFileHolder && currentFolder.type == VirtualFileHolder.BOOKMARKS -> false
+        else -> isBookmarked
+    }
+
+    val showFavoriteIcon = when {
+        currentFolder is VirtualFileHolder && currentFolder.type == VirtualFileHolder.FAVORITES -> false
+        else -> isFavorited
+    }
+
     Isolate {
         Box(
             modifier = Modifier
@@ -221,6 +244,80 @@ fun FileIcon(
                 FileContentIcon(item)
             }
 
+            // Video overlay with reduced transparency (8% instead of 15%)
+            if (isVideo && videoDuration != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.08f))
+                )
+            }
+
+            // BOTTOM-LEFT: Favorite & Bookmark Icons with Pill Background
+            if (showFavoriteIcon || showBookmarkIcon) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .background(
+                            color = Color.Black.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Favorite icon (white heart) - shown first
+                    if (showFavoriteIcon) {
+                        Icon(
+                            imageVector = Icons.Rounded.Favorite,
+                            contentDescription = "Favorited",
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+
+                    // Bookmark icon (white bookmark) - shown second
+                    if (showBookmarkIcon) {
+                        Icon(
+                            imageVector = Icons.Rounded.Bookmark,
+                            contentDescription = "Bookmarked",
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+
+            // TOP-RIGHT: Video duration badge (only for videos)
+            if (isVideo && videoDuration != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(
+                            color = Color.Black.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = "Video",
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = videoDuration!!,
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
             if (!item.canRead) {
                 Icon(
                     modifier = Modifier
@@ -236,13 +333,54 @@ fun FileIcon(
     }
 }
 
-// Bookmark functions
+private fun isVideoFile(extension: String): Boolean {
+    return FileMimeType.videoFileType.contains(extension.lowercase())
+}
+
+private suspend fun getVideoDuration(filePath: String): String? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(filePath)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            retriever.release()
+
+            duration?.let {
+                val durationMs = it.toLong()
+                val seconds = (durationMs / 1000) % 60
+                val minutes = (durationMs / (1000 * 60)) % 60
+                val hours = durationMs / (1000 * 60 * 60)
+
+                if (hours > 0) {
+                    String.format("%d:%02d:%02d", hours, minutes, seconds)
+                } else {
+                    String.format("%d:%02d", minutes, seconds)
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
 private suspend fun checkBookmarkStatus(filePath: String, onResult: (Boolean) -> Unit) {
     withContext(Dispatchers.IO) {
         try {
             val bookmarks = com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getBookmarks()
             val isBookmarked = bookmarks.any { it.uniquePath == filePath }
             onResult(isBookmarked)
+        } catch (e: Exception) {
+            onResult(false)
+        }
+    }
+}
+
+private suspend fun checkFavoriteStatus(filePath: String, onResult: (Boolean) -> Unit) {
+    withContext(Dispatchers.IO) {
+        try {
+            val favorites = globalClass.preferencesManager.favorites
+            val isFavorited = favorites.any { it == filePath }
+            onResult(isFavorited)
         } catch (e: Exception) {
             onResult(false)
         }

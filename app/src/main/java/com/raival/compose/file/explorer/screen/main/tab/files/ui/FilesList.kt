@@ -2,44 +2,26 @@ package com.raival.compose.file.explorer.screen.main.tab.files.ui
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +34,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -65,9 +46,9 @@ import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileItem
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ViewType
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListFontSize
@@ -124,8 +105,7 @@ private fun EmptyFolderContent(tab: FilesTab) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            modifier = Modifier
-                .fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             text = stringResource(
                 when {
                     !tab.activeFolder.canRead -> R.string.cant_access_content
@@ -138,8 +118,7 @@ private fun EmptyFolderContent(tab: FilesTab) {
         if (tab.activeFolder.canRead && !preferencesManager.showHiddenFiles) {
             Space(12.dp)
             Text(
-                modifier = Modifier
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 text = stringResource(R.string.empty_without_hidden_files),
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center
@@ -240,11 +219,10 @@ fun FilesListGrid(tab: FilesTab) {
         }
     }
 
-    // Conditional spacing based on whether names are shown
     val gridSpacing = if (tab.viewConfig.galleryMode && tab.viewConfig.hideMediaNames) {
-        0.5.dp  // Ultra-minimal gap when names are hidden
+        0.5.dp
     } else {
-        1.dp    // Slightly more gap when names are shown (but still minimal)
+        1.dp
     }
 
     LazyVerticalGrid(
@@ -317,12 +295,17 @@ private fun ColumnFileItem(
     initialPosition: Int
 ) {
     var isBookmarked by remember { mutableStateOf(false) }
+    var isFavorited by remember { mutableStateOf(false) }
     var fileDetails by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(currentItemPath) {
         checkBookmarkStatus(currentItemPath) { bookmarked ->
             isBookmarked = bookmarked
+        }
+
+        checkFavoriteStatus(currentItemPath) { favorited ->
+            isFavorited = favorited
         }
 
         coroutineScope.launch {
@@ -379,7 +362,9 @@ private fun ColumnFileItem(
         viewConfigs = viewConfigs,
         mediaFiles = mediaFiles,
         initialPosition = initialPosition,
-        isBookmarked = isBookmarked
+        isBookmarked = isBookmarked,
+        isFavorited = isFavorited,
+        currentFolder = tab.activeFolder
     )
 }
 
@@ -399,12 +384,35 @@ private fun GridFileItem(
     columnCount: Int = 3
 ) {
     var isBookmarked by remember { mutableStateOf(false) }
+    var isFavorited by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    val isVideo = isVideoFile(item.getFileExtension())
+    var videoDuration by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(itemPath) {
         checkBookmarkStatus(itemPath) { bookmarked ->
             isBookmarked = bookmarked
         }
+
+        checkFavoriteStatus(itemPath) { favorited ->
+            isFavorited = favorited
+        }
+
+        if (isVideo) {
+            videoDuration = getVideoDuration(item.uniquePath)
+        }
+    }
+
+    // Determine which icons to show based on current folder
+    val showBookmarkIcon = when {
+        tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type == VirtualFileHolder.BOOKMARKS -> false
+        else -> isBookmarked
+    }
+
+    val showFavoriteIcon = when {
+        tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type == VirtualFileHolder.FAVORITES -> false
+        else -> isFavorited
     }
 
     fun toggleSelection() {
@@ -478,30 +486,110 @@ private fun GridFileItem(
                 else Modifier
                     .size((getFileListIconSize(tab.activeFolder) * 2).dp)
             ) {
-                FileIcon(
-                    item = item,
-                    size = if (viewConfigs.galleryMode) {
-                        120.dp
-                    } else {
-                        (getFileListIconSize(tab.activeFolder) * 1.8).dp
-                    },
-                    viewConfigs = viewConfigs,
-                    onClick = { handleClick() },
-                    onLongClick = { handleLongClick() }
-                )
-
-                if (isBookmarked) {
-                    Icon(
+                Isolate {
+                    Box(
                         modifier = Modifier
-                            .size(14.dp)
-                            .align(Alignment.TopEnd)
-                            .padding(2.dp),
-                        imageVector = Icons.Rounded.CheckCircle,
-                        tint = MaterialTheme.colorScheme.primary,
-                        contentDescription = "Bookmarked"
-                    )
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(4.dp))
+                            .graphicsLayer { alpha = if (item.isHidden()) 0.4f else 1f }
+                    ) {
+                        var useCoil by remember(item.uid) {
+                            mutableStateOf(canUseCoil(item))
+                        }
+
+                        if (useCoil) {
+                            AsyncImage(
+                                modifier = Modifier.fillMaxSize(),
+                                model = ImageRequest
+                                    .Builder(globalClass)
+                                    .data(item)
+                                    .build(),
+                                filterQuality = FilterQuality.Low,
+                                contentScale = if (viewConfigs.cropThumbnails) ContentScale.Crop else ContentScale.Fit,
+                                contentDescription = null,
+                                onError = { useCoil = false }
+                            )
+                        } else {
+                            FileContentIcon(item)
+                        }
+
+                        // Video overlay with reduced transparency (8% instead of 15%)
+                        if (isVideo && videoDuration != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.08f))
+                            )
+                        }
+                    }
                 }
 
+                // BOTTOM-LEFT: Favorite & Bookmark Icons with Pill Background
+                if (showFavoriteIcon || showBookmarkIcon) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(6.dp)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Favorite icon (white heart) - shown first
+                        if (showFavoriteIcon) {
+                            Icon(
+                                imageVector = Icons.Rounded.Favorite,
+                                contentDescription = "Favorited",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+
+                        // Bookmark icon (white bookmark) - shown second
+                        if (showBookmarkIcon) {
+                            Icon(
+                                imageVector = Icons.Rounded.Bookmark,
+                                contentDescription = "Bookmarked",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+
+                // TOP-RIGHT: Video duration badge (only for videos)
+                if (isVideo && videoDuration != null) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Video",
+                            tint = Color.White,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            text = videoDuration!!,
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // Selection overlay
                 if (isSelected) {
                     Box(
                         modifier = Modifier
@@ -547,6 +635,36 @@ private fun GridFileItem(
                         .padding(horizontal = 2.dp)
                 )
             }
+        }
+    }
+}
+
+private fun isVideoFile(extension: String): Boolean {
+    return FileMimeType.videoFileType.contains(extension.lowercase())
+}
+
+private suspend fun getVideoDuration(filePath: String): String? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(filePath)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            retriever.release()
+
+            duration?.let {
+                val durationMs = it.toLong()
+                val seconds = (durationMs / 1000) % 60
+                val minutes = (durationMs / (1000 * 60)) % 60
+                val hours = durationMs / (1000 * 60 * 60)
+
+                if (hours > 0) {
+                    String.format("%d:%02d:%02d", hours, minutes, seconds)
+                } else {
+                    String.format("%d:%02d", minutes, seconds)
+                }
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 }
@@ -600,6 +718,18 @@ private suspend fun checkBookmarkStatus(filePath: String, onResult: (Boolean) ->
             val bookmarks = com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getBookmarks()
             val isBookmarked = bookmarks.any { it.uniquePath == filePath }
             onResult(isBookmarked)
+        } catch (e: Exception) {
+            onResult(false)
+        }
+    }
+}
+
+private suspend fun checkFavoriteStatus(filePath: String, onResult: (Boolean) -> Unit) {
+    withContext(Dispatchers.IO) {
+        try {
+            val favorites = globalClass.preferencesManager.favorites
+            val isFavorited = favorites.any { it == filePath }
+            onResult(isFavorited)
         } catch (e: Exception) {
             onResult(false)
         }
